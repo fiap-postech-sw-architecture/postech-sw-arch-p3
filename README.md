@@ -245,6 +245,8 @@ Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose
 | Provisionamento EKS/RDS/gateway na AWS | ⏳ aguardando **credenciais AWS Academy** (sessões do Learner Lab; runbook no p3-docs) |
 | Vídeo de demonstração e PDF da entrega | 📅 planejados para a fase 5 do cronograma interno |
 
+- Links de deploys ativos: **n/a permanente** — os ambientes AWS Academy são efêmeros por design (`terraform destroy` pós-demo, [ADR-026](docs/arquitetura/adr/fase3/026-cloud-alvo-aws-academy.md)); o repo documenta como subir o ambiente em minutos, e o PDF de submissão registra essa justificativa.
+
 ## Desenvolvimento
 
 | Tópico | Onde ler |
@@ -273,7 +275,7 @@ Front em Python puro (NiceGUI) para testes manuais integrados da API — imagem 
 | JWT_REFRESH_EXPIRATION_MINUTES | Tempo de expiração do refresh token | 10080 (7 dias) |
 | ENCRYPTION_KEY | Chave Fernet da PII em repouso (estável entre réplicas) | -- |
 | ENVIRONMENT | Ambiente (development/production) | development |
-| CORS_ORIGINS | Origens permitidas para CORS | http://localhost:3000 |
+| CORS_ORIGINS | Origens permitidas para CORS | http://localhost:8080 |
 | RATE_LIMIT | Limite padrão do rate limiter, notação do pacote `limits` | 60/minute |
 | TRUSTED_PROXIES | Proxies confiáveis para ler o `X-Forwarded-For` no rate-limit por IP real; vazio = XFF ignorado | vazio |
 | RUN_MIGRATIONS_ON_STARTUP | Executar migrations ao iniciar o app | false (**false** no cluster — o Job `pytstop-migrate` é o dono da migração) |

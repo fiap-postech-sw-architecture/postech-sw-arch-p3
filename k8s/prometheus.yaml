@@ -29,10 +29,25 @@ data:
       # http_request_duration_seconds{method,rota,status} e metricas de
       # negocio (pytstop_os_criadas_total, pytstop_os_duracao_status_segundos).
       # O `up` deste job alimenta o alerta de health no Grafana.
+      # Scrape POR POD (role: pod), nao pelo Service: os counters OTel sao
+      # por processo — sob HPA o scrape via Service balanceia entre replicas
+      # e subconta. Exige `pods: get/list/watch` no ClusterRole abaixo; as
+      # queries dos dashboards agregam com sum()/sum by ().
       - job_name: pytstop-api
-        static_configs:
-          - targets:
-              - pytstop-api:8000
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - pytstop
+        relabel_configs:
+          # So os pods da API (label `app: pytstop-api` do deployment.yaml)...
+          - action: keep
+            source_labels: [__meta_kubernetes_pod_label_app]
+            regex: pytstop-api
+          # ...e so o alvo da porta 8000 (a porta `http` declarada no pod).
+          - action: keep
+            source_labels: [__meta_kubernetes_pod_container_port_number]
+            regex: "8000"
       # kube-state-metrics: estado dos objetos k8s (limites de recursos por
       # pod, status de deployments/HPA) — ver kube-state-metrics.yaml.
       - job_name: kube-state-metrics
@@ -54,11 +69,6 @@ data:
           insecure_skip_verify: true
         kubernetes_sd_configs:
           - role: node
-        relabel_configs:
-          # Propaga as labels do node (ex.: kubernetes.io/hostname) para as
-          # series — identifica o node nos dashboards multi-node.
-          - action: labelmap
-            regex: __meta_kubernetes_node_label_(.+)
 ---
 # ServiceAccount + RBAC minimo para o service-discovery `role: node` e o
 # scrape do kubelet (fase 2 nao precisava: so targets estaticos). Leitura
@@ -81,6 +91,11 @@ rules:
   # Discovery dos nodes (kubernetes_sd_configs role: node).
   - apiGroups: [""]
     resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  # Discovery dos pods da API (kubernetes_sd_configs role: pod, job
+  # pytstop-api — scrape por pod para nao subcontar sob HPA).
+  - apiGroups: [""]
+    resources: ["pods"]
     verbs: ["get", "list", "watch"]
   # Autorizacao do kubelet: GET em /metrics/* mapeia para o subresource
   # nodes/metrics; nodes/proxy cobre variacoes de configuracao do kubelet.

@@ -17,6 +17,11 @@
 #     AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN devem ser
 #     re-gravados a cada Start Lab — runbook `aws-academy-setup.md` no repo
 #     postech-sw-arch-p3-docs. Credencial vencida = deploy-eks falha no login.
+#   - SEGREDOS DE RUNTIME DO EKS (ADR-033, Adendo (d)): alem dos AWS acima,
+#     o deploy-eks exige APP_JWT_SECRET, APP_ENCRYPTION_KEY e
+#     APP_ADMIN_PASSWORD (GitHub Secrets, estaveis) — viram o Secret
+#     `pytstop-secrets` no cluster; RDS_DATABASE_URL vem do output do
+#     terraform do p3-infra-db.
 name: CD
 
 on:
@@ -248,6 +253,20 @@ jobs:
             --docker-username='${{ github.actor }}' \
             --docker-password='${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}' \
             --dry-run=client -o yaml | kubectl apply -f -
+          # pytstop-secrets com valores REAIS vindos de GitHub Secrets (M2/
+          # ADR-033 Adendo (d)): sem isto o EKS publico rodaria com os
+          # segredos de demo commitados em k8s/secret.yaml (que fica FORA do
+          # overlay EKS de proposito — so o fluxo kind local usa a demo).
+          # ADMIN_EMAIL/ORCAMENTO_WEBHOOK_TOKEN seguem os valores de demo da
+          # base (nao ha requisito de troca-los por ambiente).
+          kubectl -n pytstop create secret generic pytstop-secrets \
+            --from-literal=JWT_SECRET='${{ secrets.APP_JWT_SECRET }}' \
+            --from-literal=ENCRYPTION_KEY='${{ secrets.APP_ENCRYPTION_KEY }}' \
+            --from-literal=ADMIN_PASSWORD='${{ secrets.APP_ADMIN_PASSWORD }}' \
+            --from-literal=ADMIN_EMAIL='admin@pytstop.dev' \
+            --from-literal=ORCAMENTO_WEBHOOK_TOKEN='demo-webhook-orcamento-nao-usar-em-producao' \
+            --from-literal=DATABASE_URL='${{ secrets.RDS_DATABASE_URL }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
       # Mesma ordem do fluxo kind (TD-026: migracao ANTES do rollout), mas
       # via kustomize: renderiza o overlay uma vez com a tag imutavel do SHA
       # e aplica em tres passes por label — (a) apoio, (b) Job de migracao +
@@ -294,3 +313,8 @@ jobs:
           done
           kubectl -n pytstop logs deploy/pytstop-api --tail=50 || true
           exit 1
+      # Job verde sem deploy nenhum e silencioso demais — o notice deixa o
+      # motivo visivel no summary do run.
+      - if: steps.aws.outputs.enabled != 'true'
+        name: Notice (deploy skipped)
+        run: echo "::notice::deploy EKS pulado — secrets AWS ausentes (sessão Academy fechada)"

@@ -43,15 +43,18 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import TYPE_CHECKING, Final
 
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from fastapi import FastAPI
+
+    # So anotacao: o extra `otel` fica fora do ambiente de lint/teste, e o
+    # override `opentelemetry.*` (ignore_missing_imports) mantem o mypy verde
+    # sem ele (os tipos degradam para Any nesse ambiente).
+    from opentelemetry.metrics import Counter, Histogram
     from starlette.middleware.base import RequestResponseEndpoint
     from starlette.requests import Request
     from starlette.responses import Response
@@ -96,23 +99,6 @@ _BUCKETS_DURACAO_STATUS: Final = (
 )
 
 
-class _Contador(Protocol):
-    """Superficie minima de um Counter OTel usada pela fachada."""
-
-    # corpo `pass` (nao `...`) evita o FP CodeQL py/ineffectual-statement
-    def add(self, amount: int) -> None:
-        pass
-
-
-class _Histograma(Protocol):
-    """Superficie minima de um Histogram OTel usada pela fachada."""
-
-    def record(
-        self, amount: float, attributes: Mapping[str, str] | None = None
-    ) -> None:
-        pass
-
-
 class MetricasApi:
     """Fachada dos instrumentos da API; no-op ate ``configurar_metricas_api``.
 
@@ -123,16 +109,16 @@ class MetricasApi:
     """
 
     def __init__(self) -> None:
-        self._http_duracao: _Histograma | None = None
-        self._os_criadas: _Contador | None = None
-        self._os_duracao_status: _Histograma | None = None
+        self._http_duracao: Histogram | None = None
+        self._os_criadas: Counter | None = None
+        self._os_duracao_status: Histogram | None = None
 
     def _vincular(
         self,
         *,
-        http_duracao: _Histograma,
-        os_criadas: _Contador,
-        os_duracao_status: _Histograma,
+        http_duracao: Histogram,
+        os_criadas: Counter,
+        os_duracao_status: Histogram,
     ) -> None:
         self._http_duracao = http_duracao
         self._os_criadas = os_criadas

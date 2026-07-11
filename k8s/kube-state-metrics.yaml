@@ -1,6 +1,6 @@
 # kube-state-metrics — metricas do ESTADO dos objetos k8s (ADR-032/RNF-028):
-# limites de recursos por pod, status de deployments/HPA etc., raspadas pelo
-# Prometheus (job `kube-state-metrics` em prometheus.yaml). Complementa o
+# limites de recursos por pod (kube_pod_container_resource_limits), raspadas
+# pelo Prometheus (job `kube-state-metrics` em prometheus.yaml). Complementa o
 # cAdvisor (uso real de CPU/memoria) — juntos dao "uso / limite" nos
 # dashboards e no alerta de CPU. Manifests puros no padrao do resto do k8s/
 # (sem helm/operator), imagem oficial com tag imutavel (ADR-019).
@@ -15,8 +15,8 @@ metadata:
   labels:
     app: kube-state-metrics
 ---
-# ClusterRole (nao Role): o kube-state-metrics observa objetos do cluster
-# inteiro (nodes nao tem namespace). Somente list/watch — leitura pura.
+# ClusterRole (nao Role): o kube-state-metrics observa pods do cluster
+# inteiro, nao so do namespace pytstop. Somente list/watch — leitura pura.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -25,16 +25,7 @@ metadata:
     app: kube-state-metrics
 rules:
   - apiGroups: [""]
-    resources: ["pods", "nodes", "namespaces"]
-    verbs: ["list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets"]
-    verbs: ["list", "watch"]
-  - apiGroups: ["autoscaling"]
-    resources: ["horizontalpodautoscalers"]
-    verbs: ["list", "watch"]
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
+    resources: ["pods"]
     verbs: ["list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -77,7 +68,9 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             # Coleta so o que dashboards/alertas usam — espelho do ClusterRole.
-            - --resources=pods,nodes,namespaces,deployments,replicasets,horizontalpodautoscalers,jobs
+            # Hoje e' so kube_pod_container_resource_limits (alerta de CPU no
+            # grafana.yaml); ampliar a lista aqui E no ClusterRole juntos.
+            - --resources=pods
           ports:
             - name: http-metrics
               containerPort: 8080

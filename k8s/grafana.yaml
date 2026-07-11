@@ -126,7 +126,7 @@ data:
           },
           "options": {"colorMode": "background"},
           "targets": [
-            {"refId": "A", "expr": "up", "legendFormat": "{{job}}", "instant": true}
+            {"refId": "A", "expr": "min by (job) (up{job=~\"pytstop-.*|kube-state-metrics\"})", "legendFormat": "{{job}}", "instant": true}
           ]
         },
         {
@@ -219,7 +219,7 @@ data:
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "fieldConfig": {"defaults": {"unit": "percentunit", "decimals": 2}, "overrides": []},
           "targets": [
-            {"refId": "A", "expr": "avg_over_time(up{job=\"pytstop-api\"}[24h])", "legendFormat": "uptime 24h"}
+            {"refId": "A", "expr": "avg(avg_over_time(up{job=\"pytstop-api\"}[24h]))", "legendFormat": "uptime 24h"}
           ]
         },
         {

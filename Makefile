@@ -157,8 +157,16 @@ test:
 test-coverage:
 	$(PY_UI_TEST)pytest $(PYTEST_UNIT_ARGS) --cov-report=term-missing --cov-report=xml:coverage.xml
 
+# Colima (macOS): testcontainers precisa do DOCKER_HOST no socket do colima
+# e do socket override (o ryuk monta /var/run/docker.sock dentro do proprio
+# container) — mesmo padrao do Makefile da lambda. Ambos inocuos com Docker
+# Desktop e no CI ubuntu, que ja expoem /var/run/docker.sock.
 test-integ:
-	$(PY)pytest tests/integracao/ -x -q --tb=short
+	@if [ -z "$$DOCKER_HOST" ] && [ -S "$$HOME/.colima/default/docker.sock" ]; then \
+		export DOCKER_HOST="unix://$$HOME/.colima/default/docker.sock"; \
+		echo ">> colima detectado: DOCKER_HOST=$$DOCKER_HOST"; \
+	fi; \
+	TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock $(PY)pytest tests/integracao/ -x -q --tb=short
 
 test-all:
 	$(PY)pytest tests/ -x -q -m "not lento"

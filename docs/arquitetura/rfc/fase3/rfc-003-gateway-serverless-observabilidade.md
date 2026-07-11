@@ -84,7 +84,7 @@ O **Amazon EKS** ([ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md)) roda
 | `postech-sw-arch-p3-infra-db` | RDS PostgreSQL 16 (instância, subnet group, security group) | [ADR-031](../../adr/fase3/031-banco-gerenciado-rds.md) |
 | `postech-sw-arch-p3` | Nenhum Terraform — manifests `k8s/` da aplicação (deploy no cluster via pipeline do app) | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md), [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) |
 
-> A colocação do Terraform do gateway no repo `p3-lambda` é **detalhamento desta RFC** (gateway e functions compartilham ciclo de vida e são provisionados juntos — o authorizer referencia o ARN da function); o [ADR-027](../../adr/fase3/027-api-gateway-aws.md) fixa a tecnologia e remete a distribuição fina aos documentos de infra.
+> A colocação do Terraform do gateway no repo `p3-lambda` foi **decidida no [ADR-027](../../adr/fase3/027-api-gateway-aws.md)**; esta RFC apenas a consolida (gateway e functions compartilham ciclo de vida e são provisionados juntos — o authorizer referencia o ARN da function).
 
 ### Modelo de dados (ER atualizado)
 
@@ -361,7 +361,7 @@ O acompanhamento público por placa+documento (`router_publico.py`) permanece co
 
 ## 6. Fluxo de deploy multi-repo (CI/CD)
 
-Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)): `ci.yml` com os gates adequados ao conteúdo e `cd.yml` com deploy automático por branch — push em **`homolog` → ambiente de homologação**; push em **`main` → produção**. Main protegida (sem commit direto, PR obrigatório) nos quatro repos, ativada ao final do bootstrap.
+Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)): `ci.yml` com os gates adequados ao conteúdo e `cd.yml` com deploy automático por branch — push em **`homolog` → ambiente de homologação**; push em **`main` → produção**. A proteção técnica da `main` (sem commit direto, PR obrigatório) mostrou-se **inviável na org atual** (plano free + repos privados, HTTP 403 "Upgrade to GitHub Pro"); vale o fluxo de PR obrigatório por convenção documentada — ver [Adendo do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#adendo-2026-07-11--limitações-constatadas-e-decisões-complementares), item (a).
 
 | Repo | `ci.yml` | `cd.yml` |
 |---|---|---|
@@ -370,13 +370,13 @@ Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo
 | `p3-lambda` | gates Python (cobertura ≥ 95%) + `sam validate` | `terraform apply` de gateway + functions |
 | `p3` (app) | lint, typecheck, segurança, testes ≥ 95% (herdado do p2) | build da imagem + deploy dos manifests `k8s/` no cluster |
 
-**Ordem de deploy entre repositórios — documentada, não automatizada**:
+**Ordem de deploy entre repositórios — documentada, não automatizada** (ordem corrigida no [Adendo do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#adendo-2026-07-11--limitações-constatadas-e-decisões-complementares), item (c)):
 
 ```
 1. p3-infra-db    →  RDS no ar (endpoint + credenciais)
 2. p3-infra-k8s   →  EKS no ar (kubeconfig)
-3. p3-lambda      →  gateway + Lambdas (a function precisa do endpoint do banco)
-4. p3 (app)       →  migração + deploy da aplicação no EKS
+3. p3 (app)       →  migração + deploy da aplicação no EKS (URL pública do Service LoadBalancer)
+4. p3-lambda      →  gateway + Lambdas (a rota HTTP_PROXY exige a URL pública do app; a function precisa do endpoint do banco)
 ```
 
 O gatilho entre repos é manual (README/runbook) — quatro pipelines pequenos com deploy pouco frequente não justificam orquestração cross-repo ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)).
@@ -406,7 +406,7 @@ O requisito RNF-029 exige logs JSON com correlação entre requisições — e a
 | 5 | Cota do GitHub Actions esgotada: "pipelines funcionais" (entregável) não demonstráveis até a renovação | [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | gate local espelho obrigatório; workflows prontos para o primeiro run verde; renovar a cota antes da gravação do vídeo |
 | 6 | Correlação quebrada na borda: middleware atual ignora id externo; scrub de PII precisa continuar valendo | gap analysis §5 | mudança pontual no middleware (aceitar id do gateway), coberta por teste; seção 7 |
 | 7 | Deriva entre template SAM e Terraform da function (dois descritores) | [ADR-029](../../adr/fase3/029-emulacao-local-lambda.md) | fronteira de papéis explícita: mudança real sempre no Terraform; o template segue para manter a emulação fiel; `sam deploy` proibido |
-| 8 | Drift entre overlays kind × EKS | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | base kustomize única; overlay EKS mínimo (storage class, exposição, ENVIRONMENT); validação no kind a cada PR |
+| 8 | Drift entre overlays kind × EKS | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | base `k8s/` única; overlay EKS restrito ao que de fato difere do kind (imagens via GHCR com `imagePullSecrets`, Service `LoadBalancer` na API, `DATABASE_URL` via Secret `postgres-credentials` apontando ao RDS); validação no kind a cada PR |
 | 9 | Ordem manual de deploy entre repos violada por descuido (ex.: lambda antes do banco existir) | [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | ordem documentada no README de cada repo e no runbook da demo |
 | 10 | Contratos duplicados entre app e Lambda (hash de documento, claims) sem código compartilhado | [ADR-028](../../adr/fase3/028-autenticacao-serverless-cpf.md) | testes de integração na Lambda validando o token contra as claims esperadas pelo app |
 | 11 | RDS single-AZ sem réplica: RPO/RTO de demo, não de produção | [ADR-031](../../adr/fase3/031-banco-gerenciado-rds.md) | limitação consciente; upgrade (Multi-AZ, réplica) é parâmetro Terraform, não mudança de arquitetura |

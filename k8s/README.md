@@ -91,7 +91,7 @@ No cluster a migração **não** roda no boot do pod: o Job `pytstop-migrate` ro
 
 ```bash
 kubectl port-forward -n pytstop svc/pytstop-ui 8080:8080    # UI NiceGUI: http://localhost:8080/login
-kubectl port-forward -n pytstop svc/pytstop-api 8000:8000   # API: http://localhost:8000/docs
+kubectl port-forward -n pytstop svc/pytstop-api 18000:8000  # API: http://localhost:18000/docs (18000 evita colisao com a stack compose em 8000)
 kubectl port-forward -n pytstop svc/mailpit 8025:8025       # Mailpit UI: http://localhost:8025
 kubectl port-forward -n pytstop svc/jaeger 16686:16686      # Jaeger UI: http://localhost:16686
 kubectl port-forward -n pytstop svc/prometheus 9090:9090    # Prometheus UI: http://localhost:9090
@@ -112,7 +112,7 @@ O ConfigMap liga a instrumentação no cluster de demo (`OTEL_ENABLED=true`): a 
 
 O relay liga as métricas via env **inline** no `k8s/relay.yaml` (`RELAY_METRICS_ENABLED=true`/`RELAY_METRICS_PORT=9100`), e não pelo ConfigMap (diferente do `OTEL_ENABLED` da API, que vem do ConfigMap): o relay expõe `/metrics` no formato Prometheus (porta 9100, Service `pytstop-relay-metrics`) e o **Prometheus faz *scrape*** desse alvo. Com o port-forward do Prometheus acima ativo, abra **http://localhost:9090** e consulte os sinais da outbox: `outbox_pendentes`, `outbox_idade_mais_antigo_seconds`, `outbox_dead` (gauges) e `outbox_entregue_total`/`outbox_falha_total`/`outbox_dead_total`/`outbox_retry_total` (counters). Ausente `RELAY_METRICS_ENABLED`, o relay não sobe o `/metrics` e o alvo fica vazio.
 
-Na fase 3 (ADR-032) o mesmo Prometheus raspa também o `/metrics` da **API** (`pytstop-api:8000` — latência `http_request_duration_seconds` e métricas de negócio `pytstop_os_*`), o **kube-state-metrics** (`kube-state-metrics:8080`) e o **cAdvisor** via kubelet (`role: node`, HTTPS com bearer token da ServiceAccount e `insecure_skip_verify` — o certificado do kubelet no kind é autoassinado, mesmo racional do `--kubelet-insecure-tls` do metrics-server).
+Na fase 3 (ADR-032) o mesmo Prometheus raspa também o `/metrics` da **API** (*scrape* **por pod** via service-discovery `role: pod`, porta 8000 — os counters OTel são por processo e, sob HPA, o *scrape* via Service subcontaria; latência `http_request_duration_seconds` e métricas de negócio `pytstop_os_*`), o **kube-state-metrics** (`kube-state-metrics:8080`) e o **cAdvisor** via kubelet (`role: node`, HTTPS com bearer token da ServiceAccount e `insecure_skip_verify` — o certificado do kubelet no kind é autoassinado, mesmo racional do `--kubelet-insecure-tls` do metrics-server).
 
 > **Escalar o relay (`replicas>1`)**: os counters (`outbox_*_total`) são in-memory por-processo e o `pytstop-relay-metrics` é um Service ClusterIP (load-balanced), então a `replicas>1` cada *scrape* cai num pod aleatório e `rate()`/`increase()` veriam resets espúrios — operar o relay escalado com counters corretos exige *scrape* por-pod (Service *headless* + *service-discovery*). Os gauges (lidos do banco) não têm esse problema. No demo (`replicas:1`) não se manifesta — detalhe na [ADR-024](../docs/arquitetura/adr/fase2/024-metricas-prometheus.md) (Negativas).
 

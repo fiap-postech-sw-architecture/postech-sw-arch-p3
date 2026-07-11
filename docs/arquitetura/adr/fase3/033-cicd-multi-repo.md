@@ -27,8 +27,8 @@ Adotar **GitHub Actions em cada um dos quatro repositórios**, com um padrão un
   - **`p3-lambda`**: os mesmos gates de código Python (cobertura ≥ 95% — a lambda nasce testada para não rebaixar o padrão, gap analysis §5) + `sam validate`;
   - **`p3-infra-k8s`** e **`p3-infra-db`**: `terraform fmt -check`, `terraform validate` e `tflint`.
 - **`cd.yml` por repo com deploy automático por branch**: push em **`homolog` → ambiente de homologação**; push em **`main` → produção** — o mapeamento exato exigido pelo challenge. Autenticação via **credenciais AWS Academy em GitHub Secrets**, rotacionadas a cada sessão do lab conforme o runbook `aws-academy-setup.md`.
-- **Ordem de deploy entre repos documentada, não automatizada**: `infra-db` → `infra-k8s` → `lambda` → `app`. O gatilho entre repos é manual (README/runbook); não há workflow cross-repo disparando cadeia de deploys — acoplamento desnecessário para quatro pipelines pequenos com deploy pouco frequente.
-- **Branch protection na `main` dos quatro repos** (sem commit direto, PR obrigatório), ativada **ao final do bootstrap** — durante o bootstrap dos repositórios o push direto foi autorizado pelo usuário; a proteção fecha antes da entrega.
+- **Ordem de deploy entre repos documentada, não automatizada**: `infra-db` → `infra-k8s` → `app` → `lambda` (ordem original deste ADR corrigida — ver Adendo (c)). O gatilho entre repos é manual (README/runbook); não há workflow cross-repo disparando cadeia de deploys — acoplamento desnecessário para quatro pipelines pequenos com deploy pouco frequente.
+- **Branch protection na `main` dos quatro repos** (sem commit direto, PR obrigatório), ativada **ao final do bootstrap** — durante o bootstrap dos repositórios o push direto foi autorizado pelo usuário; a proteção fecha antes da entrega. **Constatada inviável na org atual — ver Adendo (a)**.
 - **Espelho local obrigatório enquanto a cota do Actions estiver esgotada**: os pipelines ficam commitados e corretos, mas não executáveis; antes de cada push roda-se o gate local equivalente — `make check` no app e alvo `make gate` equivalente nos demais repos (fmt/validate/tflint, sam validate, testes). Quando a cota renovar, o CI passa a ser o gate canônico sem mudança nos workflows.
 
 ## Alternativas Consideradas
@@ -66,7 +66,7 @@ Adotar **GitHub Actions em cada um dos quatro repositórios**, com um padrão un
 
 ### Positivas
 
-* RNF-025 coberto: 4 repos com CI/CD, deploy automático homolog/produção, main protegida e PR obrigatório
+* RNF-025 coberto: 4 repos com CI/CD, deploy automático homolog/produção, main protegida e PR obrigatório — a proteção técnica da `main` mostrou-se inviável no plano atual da org; a exigência é cumprida por convenção documentada (ver Adendo (a))
 * Pipelines independentes tornam o escopo de cada mudança explícito: PR de infra não roda testes de app, PR de app não toca Terraform
 * O espelho local mantém o padrão de qualidade da fase 2 mesmo sem minutos de Actions — os gates não afrouxam, apenas mudam de executor temporariamente
 
@@ -95,5 +95,28 @@ Adotar **GitHub Actions em cada um dos quatro repositórios**, com um padrão un
 * Requisito formal: RNF-025 ([gap-analysis-fase-3.md](../../../requisitos/fase3/gap-analysis-fase-3.md)); exigência original em [desafio-tech-fase-3.md](../../../requisitos/fase3/desafio-tech-fase-3.md)
 * Rotação das credenciais AWS Academy e atualização dos secrets: runbook `aws-academy-setup.md` no repo `postech-sw-arch-p3-docs`
 * A restrição de cota do GitHub Actions e o gate local espelho estão registrados como risco no gap analysis (§5); este ADR os assume como condição operacional temporária, não como desenho
+
+## Adendo (2026-07-11) — limitações constatadas e decisões complementares
+
+A implementação dos pipelines nos quatro repositórios expôs limitações que este ADR não previa. As decisões abaixo complementam (e, onde indicado, substituem) o corpo do documento.
+
+### (a) Branch protection: inviável na org atual
+
+A ativação da branch protection na `main`, prevista na Decisão para "o final do bootstrap", é **inviável** na organização atual: plano free com repositórios privados — a API do GitHub responde **HTTP 403 "Upgrade to GitHub Pro"** nos quatro repos. A mesma limitação existe no p2 desde a fase 2, precedente já aceito pela banca.
+
+* Mitigação decidida: **fluxo de PR obrigatório por convenção documentada** — o workflow canônico do projeto proíbe commit direto na `main`; todo o histórico das fases 1–3 evidencia o cumprimento.
+* Opções registradas caso a banca exija a proteção técnica: **upgrade da org para o plano Team** ou **tornar os repositórios públicos no momento da entrega**.
+
+### (b) Homolog nos repos de infra: `terraform plan`
+
+Nos repositórios `p3-infra-k8s` e `p3-infra-db`, o push em `homolog` executa **`terraform plan`** (estágio de homologação de infra); o **apply automático acontece só na `main`**. Com um único Learner Lab e budget mínimo ([ADR-026](026-cloud-alvo-aws-academy.md)), um ambiente homolog duplicado de infraestrutura (segundo EKS + segundo RDS) é inviável. App e lambda mantêm homolog real: overlay/workspace de stage próprios.
+
+### (c) Ordem de deploy corrigida
+
+A ordem passa a ser **`infra-db` → `infra-k8s` → `app` (p3) → `lambda`/gateway** — a rota HTTP_PROXY do gateway exige a URL pública do app no EKS (Service LoadBalancer), que só existe **após** o deploy do app. Esta ordem **substitui** a ordem `infra-db → infra-k8s → lambda → app` registrada na Decisão deste ADR.
+
+### (d) Gestão de segredos de runtime
+
+Os segredos de runtime (`JWT_SECRET`, `ENCRYPTION_KEY`, `ADMIN_PASSWORD`, `DATABASE_URL`) fluem por **GitHub Secrets** → `TF_VAR_*` (repos Terraform) ou `kubectl create secret` (deploy no EKS) nos pipelines; no fluxo manual, `terraform.tfvars`/arquivos de env locais git-ignored. AWS Secrets Manager e SSM Parameter Store foram **descartados** pelas restrições de IAM/KMS do Learner Lab ([ADR-026](026-cloud-alvo-aws-academy.md)).
 
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

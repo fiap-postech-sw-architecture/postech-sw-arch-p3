@@ -40,6 +40,16 @@
 #     --docker-server=ghcr.io --docker-username=<user> --docker-password=<PAT> \
 #     --dry-run=client -o yaml | kubectl apply -f -
 #
+#   # segredos de runtime da app com valores REAIS (ADR-033, Adendo (d)) —
+#   # o k8s/secret.yaml de DEMO fica fora deste overlay de proposito: o EKS
+#   # e publico e nao pode subir com segredos commitados. No pipeline os
+#   # valores vem dos GitHub Secrets APP_JWT_SECRET/APP_ENCRYPTION_KEY/
+#   # APP_ADMIN_PASSWORD (ver cd.yml, job deploy-eks, passo completo).
+#   kubectl -n pytstop create secret generic pytstop-secrets \
+#     --from-literal=JWT_SECRET=<real> --from-literal=ENCRYPTION_KEY=<real> \
+#     --from-literal=ADMIN_PASSWORD=<real> ... \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
 # ORDEM DE APPLY (TD-026 — migracao antes do rollout): o pipeline renderiza
 # uma vez (`kubectl kustomize k8s/overlays/eks`) e aplica em tres passes por
 # label: (a) apoio (`app notin (pytstop-api,pytstop-relay,pytstop-migrate)`);
@@ -50,10 +60,9 @@ kind: Kustomization
 resources:
   - ../../namespace.yaml
   - ../../configmap.yaml
-  # Secret de DEMO da base (JWT_SECRET, ENCRYPTION_KEY, admin...): mantido —
-  # o cluster EKS e ambiente de demonstracao academica, como o kind. So o
-  # DATABASE_URL e sobrescrito (postgres-credentials, patches abaixo).
-  - ../../secret.yaml
+  # k8s/secret.yaml (valores de DEMO) NAO entra: o pytstop-secrets do EKS e
+  # criado pelo pipeline com valores reais (header acima) — incluir a demo
+  # aqui faria o apply sobrescrever o secret real de volta para a demo.
   - ../../service.yaml
   - ../../hpa.yaml
   - ../../deployment.yaml
