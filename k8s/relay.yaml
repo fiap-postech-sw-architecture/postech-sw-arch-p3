@@ -1,0 +1,152 @@
+# Deployment do relay da Transactional Outbox (RF-018 / TD-008). Mesma
+# imagem da API; sobrescreve o command para `python -m relay` (sem
+# uvicorn, sem migrations -- a migracao roda no Job `pytstop-migrate`
+# antes do rollout, TD-015). replicas:1 e o default conservador, NAO um
+# limite: o relay processa a outbox ORDER BY id e, alem do claim com
+# `FOR UPDATE SKIP LOCKED`, faz fencing de lease na entrega (re-lock
+# `FOR UPDATE SKIP LOCKED` + checagem de status na tx por-linha,
+# relay/processador.py) -- isso torna `replicas>1` seguro sem duplicar a
+# entrega, mesmo se um lease vencer no meio de uma entrega lenta (TD-021
+# fechado). Escalavel com seguranca; mantido em 1 por ora. NAO atende
+# trafego HTTP de negocio; expoe apenas /metrics (porta 9100) para o
+# Prometheus scrapear (TD-022/ADR-024) via o Service `pytstop-relay-metrics`
+# abaixo.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pytstop-relay
+  namespace: pytstop
+  labels:
+    app: pytstop-relay
+spec:
+  # Seguro escalar para >1: o fencing de lease na entrega (TD-021) serializa
+  # as replicas por linha. Mantido em 1 como default conservador.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pytstop-relay
+  template:
+    metadata:
+      labels:
+        app: pytstop-relay
+    spec:
+      # Hardening de pod (TD-024): nao-root com UID/GID numericos (casam o
+      # Dockerfile), seccomp default e fsGroup para a montagem /tmp (heartbeat).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: relay
+          # O CD troca esta tag pela tag imutavel do SHA do commit
+          # (ADR-019). `dev` e a tag do fluxo local: build + `kind load`.
+          image: ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p2-app:dev
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "relay"]
+          # Reaproveita o mesmo ConfigMap (DB_POOL_*, SMTP_*, OUTBOX_*,
+          # RELAY_HEARTBEAT) e o mesmo Secret (DATABASE_URL) da API --
+          # paridade de configuracao.
+          envFrom:
+            - configMapRef:
+                name: pytstop-config
+            - secretRef:
+                name: pytstop-secrets
+          # RELAY_HEARTBEAT vem SO do ConfigMap (envFrom acima) — a copia
+          # literal que existia aqui duplicava a fonte e podia divergir do
+          # caminho que as probes leem. As envs de metricas (TD-022/ADR-024)
+          # ligam o /metrics: RELAY_METRICS_ENABLED gateia a instrumentacao
+          # OTel (relay/metrics.py) e RELAY_METRICS_PORT casa com a
+          # `containerPort: 9100` e o Service `pytstop-relay-metrics`.
+          env:
+            - name: RELAY_METRICS_ENABLED
+              value: "true"
+            - name: RELAY_METRICS_PORT
+              value: "9100"
+          # Servidor /metrics do Prometheus (TD-022): NAO e trafego de negocio,
+          # apenas o endpoint scrapeado pelo job `pytstop-relay` (k8s/prometheus.yaml).
+          ports:
+            - name: metrics
+              containerPort: 9100
+          # Readiness com o MESMO exec do liveness, janela menor: sem ela o
+          # pod nasceria Ready na hora e o Service de metrics apontaria para
+          # um relay que ainda nem escreveu o primeiro heartbeat. Nao ha
+          # trafego de negocio a proteger — o ganho e o endpoint /metrics so
+          # entrar no Service com o loop de fato rodando.
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os,sys,time; p=os.getenv('RELAY_HEARTBEAT','/tmp/relay-heartbeat'); sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 60 else 1)"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          # Liveness por HEARTBEAT (F6), nao por `kill -0 1`: um SMTP travado
+          # ou loop preso mantem o PID 1 vivo, mas para de atualizar o
+          # heartbeat. A probe falha se o arquivo nao existir ou estiver mais
+          # velho que 60s (>= 2 ciclos de poll de 5s + margem) -> o kubelet
+          # reinicia o pod. So um relay vivo E progredindo passa.
+          # timeoutSeconds explicito (default 1s): o exec sobe um interprete
+          # Python inteiro — num no sob pressao 1s mata a probe por timeout
+          # e reinicia um relay saudavel.
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os,sys,time; p=os.getenv('RELAY_HEARTBEAT','/tmp/relay-heartbeat'); sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 60 else 1)"
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          # Hardening de container (TD-024): sem priv-esc, root FS read-only,
+          # capabilities dropadas. O relay escreve o heartbeat em /tmp, que e um
+          # emptyDir gravavel (RELAY_HEARTBEAT=/tmp/relay-heartbeat).
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Service so do /metrics (TD-022/ADR-024): da um nome DNS estavel
+# (`pytstop-relay-metrics:9100`) para o Prometheus scrapear o relay. NAO
+# expoe trafego de negocio — o relay continua sem Service de aplicacao (nao
+# atende HTTP). ClusterIP: o acesso e interno ao cluster (o Prometheus do
+# namespace `pytstop`).
+#
+# Nota (replicas>1): este ClusterIP e load-balanced. Como os counters
+# (outbox_*_total) sao in-memory por-processo, escalar o relay para replicas>1
+# exigiria scrape por-pod (Service headless + service-discovery) para
+# rate()/increase() nao verem resets espurios; os gauges (lidos do banco) nao
+# tem esse problema. Detalhe na ADR-024 (Negativas).
+apiVersion: v1
+kind: Service
+metadata:
+  name: pytstop-relay-metrics
+  namespace: pytstop
+  labels:
+    app: pytstop-relay
+spec:
+  type: ClusterIP
+  selector:
+    app: pytstop-relay
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: 9100

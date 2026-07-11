@@ -1,0 +1,97 @@
+# Configuracao NAO sensivel da API (RNF-020; RFC-002 §6). Segredos vivem
+# em secret.yaml -- nunca aqui.
+#
+# Sem destino no cluster (RFC-002 §6): UVICORN_HOST/UVICORN_PORT (o
+# entrypoint.sh fixa `--host 0.0.0.0 --port 8000` no container),
+# POSTGRES_* (Secret do StatefulSet em /infra -- ADR-017),
+# PYTSTOP_GIT_SHA/PYTSTOP_GIT_DATE (gravadas na imagem como build args),
+# APP_PORT/DB_PORT/UI_PORT/BACKEND_URL (mapeamentos do compose e ui/
+# dev-only), JWT_REFRESH_EXPIRATION_MINUTES (default interno do codigo,
+# adequado a demo). O armazenamento do rate limiter (TD-016) deixou de
+# ser default interno: sob o HPA ele aponta para o Redis compartilhado
+# via RATE_LIMIT_STORAGE_URI abaixo (redis.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pytstop-config
+  namespace: pytstop
+data:
+  # `production` desabilitaria /docs e /redoc (src/main.py); o cluster da
+  # fase 2 e ambiente de demo e a banca valida pela UI do Swagger.
+  # MANTIDO `development` DE PROPOSITO: este cluster usa os segredos de
+  # demonstracao de secret.yaml. Trocar para `production` faria a guarda de
+  # startup (issue #74; src/compartilhado/interfaces/middleware.py
+  # validar_segredos_no_startup) ABORTAR o boot -- producao real exige injetar
+  # JWT_SECRET/ENCRYPTION_KEY/ORCAMENTO_WEBHOOK_TOKEN fortes e nao-demo via
+  # SealedSecrets/External Secrets (RFC-002 §6), nao os literais commitados.
+  ENVIRONMENT: "development"
+  # Origem real da UI dev (NiceGUI em UI_PORT=8080, ver docker-compose.yml);
+  # o valor antigo (localhost:3000) era resquicio de scaffold e nao casava
+  # com nenhum front do projeto.
+  CORS_ORIGINS: "http://localhost:8080"
+  JWT_EXPIRATION_MINUTES: "30"
+  # Pool de conexoes por replica (RNF-024). Pior caso do HPA para a API:
+  # (DB_POOL_SIZE + DB_MAX_OVERFLOW) * maxReplicas = (5 + 10) * 5 = 75.
+  # Somam-se o engine admin por pod (mesmos defaults, trafego minimo dos
+  # endpoints de DLQ) e o engine do relay (1 replica) — o teto TEORICO
+  # passa de 100, mas os pools so crescem sob demanda e o caminho quente
+  # e a API; dentro do max_connections=100 do Postgres (postgres:16
+  # default, infra/postgres.tf) na pratica. Ajustar junto de maxReplicas
+  # (hpa.yaml) e do max_connections se redimensionar (finding devops).
+  DB_POOL_SIZE: "5"
+  DB_MAX_OVERFLOW: "10"
+  # No cluster a migracao NAO roda no boot do pod (TD-015): o Job dedicado
+  # `pytstop-migrate` (k8s/jobs/migration-job.yaml) roda `alembic upgrade
+  # head` uma vez antes do rollout, resolvendo a corrida entre N replicas
+  # (ADR-019; RFC-002 §7). Por isso ambas ficam "false" aqui -- o Job e' o
+  # dono de migrate+seed no cluster; o entrypoint nao toca o schema.
+  RUN_MIGRATIONS_ON_STARTUP: "false"
+  # Admin inicial da demo: criado pelo Job de migracao (best-effort), nao
+  # pelo boot dos pods da API. Ver migration-job.yaml e secret.yaml.
+  RUN_SEED_ON_STARTUP: "false"
+  # SMTP do Mailpit (ADR-018): Service `mailpit` neste namespace.
+  SMTP_HOST: "mailpit"
+  SMTP_PORT: "1025"
+  SMTP_FROM: "oficina@pytstop.local"
+  # Relay da Transactional Outbox (RF-018): intervalo do poll de seguranca
+  # (NOTIFY acorda antes; o poll cobre eventos perdidos, backoff e lease
+  # vencido), tamanho do lote reivindicado por ciclo (pequeno: limita a
+  # janela de duplicacao em crash), lease/visibility-timeout (> timeout do
+  # SMTP) e caminho do arquivo de heartbeat (liveness do relay).
+  OUTBOX_POLL_SEGUNDOS: "5"
+  OUTBOX_LOTE: "10"
+  OUTBOX_LEASE_SEGUNDOS: "60"
+  RELAY_HEARTBEAT: "/tmp/relay-heartbeat"
+  # Traces OTLP (ADR-020): o cluster de demo liga a instrumentacao —
+  # FastAPI + SQLAlchemy exportam para o Jaeger (jaeger.yaml, Service
+  # `jaeger` neste namespace, porta OTLP/gRPC). Default do codigo e off;
+  # compose e CI nao pagam custo algum.
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+  # Store do rate limiter (TD-016): sob o HPA (hpa.yaml) cada replica
+  # contaria sozinha num store em memoria, furando o limite global. Aponta
+  # para o Service `redis` deste namespace (redis.yaml) -- contador unico e
+  # compartilhado. Default do codigo e in-memory (basta no compose/CI de
+  # uma instancia); aqui o limite vale para a frota toda.
+  RATE_LIMIT_STORAGE_URI: "redis://redis:6379"
+  # Proxies confiaveis para o rate-limit pelo IP REAL do cliente (TD-023).
+  # Quando definido, o app instala o ProxyHeadersMiddleware do uvicorn, que
+  # reescreve o client a partir do X-Forwarded-For SOMENTE quando o peer
+  # imediato esta nesta lista -> a chave do rate limiter vira o cliente real,
+  # nao o IP do proxy/ingress. Aceita IP exato, CIDR ou `*`.
+  #
+  # DEMO: VAZIO (efetivamente OFF). O acesso e ClusterIP/port-forward, sem
+  # ingress injetando XFF; confiar no XFF aqui seria spoofavel sem ganho.
+  # PRODUCAO atras de ingress: setar para o(s) IP(s)/CIDR do ingress (ex.:
+  # "10.0.0.0/8"); se o app for ESTRITAMENTE ClusterIP atras do proxy (so o
+  # ingress o alcanca), "*" e aceitavel. NUNCA "*" exposto direto a internet.
+  # PRECONDICAO: o proxy/ingress confiavel DEVE adicionar (append) ou
+  # sobrescrever o X-Forwarded-For com o IP real do cliente; se ele apenas
+  # repassar um XFF enviado pelo cliente, o limite e burlavel (a entrada mais
+  # a direita nao-confiavel vira controlada pelo atacante). No ingress-nginx o
+  # `use-forwarded-headers` controla esse append — confirme antes de habilitar:
+  # em alguns charts/versoes do ingress-nginx o default de
+  # `use-forwarded-headers` e `false` (o controller NAO faz append do XFF), ou
+  # seja, a pre-condicao de append NAO e automatica; habilite-a explicitamente,
+  # senao o XFF do cliente e repassado e o limite fica burlavel.
+  TRUSTED_PROXIES: ""

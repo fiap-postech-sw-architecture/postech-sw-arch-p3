@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import pytest
+from cryptography.fernet import InvalidToken
+
+from src.compartilhado.infraestrutura.encryption import EncryptionService
+
+
+class TestEncryptionService:
+    def test_encrypt_decrypt_roundtrip(self) -> None:
+        enc = EncryptionService()
+        plaintext = "12345678901"
+        ciphertext = enc.encrypt(plaintext)
+        assert ciphertext != plaintext
+        assert enc.decrypt(ciphertext) == plaintext
+
+    def test_decrypt_unencrypted_returns_original(self) -> None:
+        enc = EncryptionService()
+        raw = "12345678901"
+        assert enc.decrypt(raw) == raw
+
+    def test_encrypt_produces_different_ciphertext(self) -> None:
+        enc = EncryptionService()
+        text = "12345678901"
+        c1 = enc.encrypt(text)
+        c2 = enc.encrypt(text)
+        assert c1 != c2
+
+    def test_singleton_retorna_mesma_instancia(self) -> None:
+        # Reset de _instance vem da fixture autouse do conftest raiz
+        # (_reset_encryption_singleton); nenhum reset manual aqui.
+        a = EncryptionService.instance()
+        b = EncryptionService.instance()
+        assert a is b
+
+    def test_hash_deterministic_retorna_hex(self) -> None:
+        enc = EncryptionService()
+        resultado = enc.hash_deterministic("12345678901")
+        assert isinstance(resultado, str)
+        assert len(resultado) == 64
+
+    def test_hash_deterministic_mesmo_input_mesmo_output(self) -> None:
+        enc = EncryptionService()
+        h1 = enc.hash_deterministic("12345678901")
+        h2 = enc.hash_deterministic("12345678901")
+        assert h1 == h2
+
+    def test_hash_deterministic_inputs_diferentes_outputs_diferentes(self) -> None:
+        enc = EncryptionService()
+        h1 = enc.hash_deterministic("12345678901")
+        h2 = enc.hash_deterministic("98765432100")
+        assert h1 != h2
+
+    def test_instance_e_thread_safe_cria_uma_unica_instancia(self) -> None:
+        # Double-checked locking: N threads concorrentes no primeiro acesso
+        # devem observar a MESMA instancia (sem duas chaves efemeras).
+        import threading
+
+        instancias: list[EncryptionService] = []
+        barreira = threading.Barrier(8)
+
+        def _obter() -> None:
+            barreira.wait()
+            instancias.append(EncryptionService.instance())
+
+        threads = [threading.Thread(target=_obter) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(set(map(id, instancias))) == 1
+
+    def test_decrypt_token_corrompido_levanta(self) -> None:
+        """Token COM prefixo Fernet que falha integridade -> raise (issue #73).
+
+        Garante que o ``decrypt`` NAO faz fail-open: um token cifrado que nao
+        decifra (chave errada / corrompido) propaga ``InvalidToken`` em vez de
+        devolver o ciphertext como se fosse o valor decifrado.
+        """
+        enc = EncryptionService()
+        token = enc.encrypt("12345678901")
+        assert token.startswith("gAAAAA")
+        # Corrompe 1 caractere na posicao 20: cai no IV/corpo, FORA do header
+        # (versao + timestamp), entao o HMAC do Fernet falha de forma
+        # deterministica. Troca por outro char A-Z mantendo base64 valido.
+        pos = 20
+        char_novo = "X" if token[pos] != "X" else "Y"
+        corrompido = token[:pos] + char_novo + token[pos + 1 :]
+        with pytest.raises(InvalidToken):
+            enc.decrypt(corrompido)
+
+    def test_decrypt_legado_sem_prefixo_nao_levanta(self) -> None:
+        """Valor SEM o prefixo Fernet (legado) -> devolvido como esta (#73)."""
+        enc = EncryptionService()
+        # O sentinela LGPD e valores legados em texto plano nao tem prefixo gAAAAA.
+        assert enc.decrypt("anonimizado@anonimizado.local") == (
+            "anonimizado@anonimizado.local"
+        )
+        assert enc.decrypt("12345678901") == "12345678901"

@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from src.cliente_veiculo.dominio.events import (
+    ClienteAtualizadoEvent,
+    ClienteCadastradoEvent,
+    ClienteDesativadoEvent,
+    VeiculoAdicionadoEvent,
+    VeiculoRemovidoEvent,
+)
+from src.cliente_veiculo.dominio.exceptions import (
+    PlacaDuplicadaException,
+    VeiculoNaoEncontradoException,
+)
+from src.cliente_veiculo.dominio.veiculo import Veiculo
+from src.compartilhado.dominio.aggregate_root import AggregateRoot
+from src.compartilhado.dominio.exceptions import ViolacaoRegraDeNegocioException
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from src.cliente_veiculo.dominio.contato import Contato
+    from src.cliente_veiculo.dominio.documento import Documento
+    from src.cliente_veiculo.dominio.placa import Placa
+
+
+@dataclass(eq=False)
+class Cliente(AggregateRoot):
+    """Agregado Cliente (raiz do contexto Cliente+Veiculo).
+
+    Encapsula dados de cadastro (nome, documento, contato), a colecao de
+    veiculos e o flag `_ativo`. Invariantes:
+    - `nome` nunca vazio.
+    - `documento` obrigatorio (CPF ou CNPJ valido).
+    - placa unica por cliente (duplicacao levanta `PlacaDuplicadaException`).
+    - remocao de veiculo inexistente levanta `VeiculoNaoEncontradoException`.
+    - cliente inativo (desativado ou anonimizado) rejeita mutacao
+      (`atualizar`/`adicionar_veiculo`/`remover_veiculo` levantam
+      `ViolacaoRegraDeNegocioException`) — o agregado e a ultima linha do
+      guard, mesmo que a aplicacao ja pre-cheque para a mensagem 409.
+
+    Cada metodo de transicao de estado registra um `DomainEvent` no aggregate
+    via `_registrar_evento`; os eventos ficam armazenados ate serem coletados
+    e publicados pelo UoW apos o commit.
+    """
+
+    # Sentinels para permitir `Cliente(_nome=..., _documento=...)` como kwargs:
+    # o runtime guard em __post_init__ rejeita vazios/None antes que o objeto
+    # escape da construcao. `_nome` e `_contato` usam `repr=False` para nao
+    # vazar PII pelo `__repr__` gerado automaticamente pelo dataclass.
+    _nome: str = field(default="", repr=False)
+    _documento: Documento | None = None  # validated in __post_init__
+    _contato: Contato | None = field(default=None, repr=False)  # validated below
+    _veiculos: list[Veiculo] = field(default_factory=list, repr=False)
+    _ativo: bool = True
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self._nome = self._nome.strip()
+        if not self._nome:
+            msg = "Nome do cliente nao pode ser vazio"
+            raise ValueError(msg)
+        if self._documento is None:
+            msg = "Documento do cliente e obrigatorio"
+            raise ValueError(msg)
+        if self._contato is None:
+            msg = "Contato do cliente e obrigatorio"
+            raise ValueError(msg)
+
+    @classmethod
+    def criar(cls, *, nome: str, documento: Documento, contato: Contato) -> Cliente:
+        """Factory de cadastro: constroi o Cliente e registra o evento de criacao.
+
+        A emissao do `ClienteCadastradoEvent` vive aqui, e nao no
+        construtor/`__post_init__`. Assim so o cadastro real (via `criar`)
+        emite: construcao crua e a reconstituicao do repository (que passa por
+        `__new__`, sem `__init__`) ficam sem evento.
+        """
+        cliente = cls(_nome=nome, _documento=documento, _contato=contato)
+        cliente._registrar_evento(ClienteCadastradoEvent(agregado_id=cliente.id))
+        return cliente
+
+    @property
+    def nome(self) -> str:
+        return self._nome
+
+    @property
+    def documento(self) -> Documento:
+        if self._documento is None:
+            msg = "Documento do cliente nao pode ser nulo"
+            raise ValueError(msg)
+        return self._documento
+
+    @property
+    def contato(self) -> Contato:
+        if self._contato is None:
+            msg = "Contato do cliente nao pode ser nulo"
+            raise ValueError(msg)
+        return self._contato
+
+    @property
+    def veiculos(self) -> tuple[Veiculo, ...]:
+        """Retorna os veiculos do cliente como tuple imutavel (espelha
+        `OrdemDeServico.itens`): expor uma copia `list` deixava mutacoes na
+        copia virarem no-op silencioso.
+        """
+        return tuple(self._veiculos)
+
+    @property
+    def ativo(self) -> bool:
+        return self._ativo
+
+    def _exigir_ativo(self) -> None:
+        """Ultima linha do invariante: cliente inativo rejeita mutacao.
+
+        Fecha a brecha de re-popular PII num agregado anonimizado (ou reverter
+        um soft-delete). A aplicacao pode pre-checar para a mensagem 409, mas o
+        agregado nunca aceita estado invalido em memoria.
+        """
+        if not self._ativo:
+            raise ViolacaoRegraDeNegocioException(
+                mensagem="cliente inativo nao pode ser alterado"
+            )
+
+    def adicionar_veiculo(
+        self, placa: Placa, marca: str, modelo: str, ano: int
+    ) -> Veiculo:
+        """Cria e adiciona um Veiculo ao cliente, rejeitando placas duplicadas."""
+        self._exigir_ativo()
+        if any(v.placa == placa for v in self._veiculos):
+            raise PlacaDuplicadaException()
+        veiculo = Veiculo(_placa=placa, _marca=marca, _modelo=modelo, _ano=ano)
+        self._veiculos.append(veiculo)
+        self._registrar_evento(
+            VeiculoAdicionadoEvent(
+                agregado_id=self.id,
+                placa_valor=placa.mascarado(),
+                marca=veiculo.marca,
+                modelo=veiculo.modelo,
+                ano=ano,
+            )
+        )
+        return veiculo
+
+    def remover_veiculo(self, veiculo_id: UUID) -> None:
+        """Remove o veiculo identificado por `veiculo_id`; levanta se nao existir."""
+        self._exigir_ativo()
+        for i, v in enumerate(self._veiculos):
+            if v.id == veiculo_id:
+                placa_removida = v.placa.mascarado()
+                self._veiculos.pop(i)
+                self._registrar_evento(
+                    VeiculoRemovidoEvent(
+                        agregado_id=self.id,
+                        placa_valor=placa_removida,
+                    )
+                )
+                return
+        raise VeiculoNaoEncontradoException()
+
+    def desativar(self) -> None:
+        """Soft-delete: marca o cliente como inativo e emite evento."""
+        if not self._ativo:
+            return
+        self._ativo = False
+        self._registrar_evento(ClienteDesativadoEvent(agregado_id=self.id))
+
+    def atualizar(self, nome: str, contato: Contato) -> None:
+        """Atualiza nome e contato do cliente. Nome vazio (ou so espacos) e rejeitado.
+
+        No-op silencioso quando nada mudou: nao emite `ClienteAtualizadoEvent`
+        para atualizacoes idempotentes (espelha `desativar`).
+        """
+        self._exigir_ativo()
+        nome = nome.strip()
+        if not nome:
+            msg = "Nome do cliente nao pode ser vazio"
+            raise ValueError(msg)
+        if contato is None:
+            # Espelha o guard de __post_init__: sem isso o agregado aceitaria
+            # estado invalido em memoria e o erro so apareceria no flush
+            # (mesma classe do catch de ServicoOferecido.atualizar, PR #59).
+            msg = "Contato do cliente e obrigatorio"
+            raise ValueError(msg)
+        if nome == self._nome and contato == self._contato:
+            return
+        self._nome = nome
+        self._contato = contato
+        self._registrar_evento(ClienteAtualizadoEvent(agregado_id=self.id))

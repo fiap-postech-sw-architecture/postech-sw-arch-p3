@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Uma execucao por ref: um novo push/commit no PR cancela a anterior
+# (cancel-in-progress so em pull_request -- em push na main deixamos concluir
+# pra nao abortar o gate pos-merge). Runs empilhados desperdicam runner.
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  DATABASE_URL: "postgresql://pytstop:pytstop@localhost:5432/pytstop_test"
+  # O fixture `engine` da integracao aceita SOMENTE TEST_DATABASE_URL (sem
+  # fallback para DATABASE_URL — o teardown faz drop_all e nao pode herdar um
+  # banco dev por acidente). No CI as duas apontam para o MESMO service.
+  TEST_DATABASE_URL: "postgresql://pytstop:pytstop@localhost:5432/pytstop_test"
+  JWT_SECRET: "ci-test-secret-key-not-for-production"
+  ENCRYPTION_KEY: ""
+  ENVIRONMENT: "test"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Verify uv.lock is up to date with pyproject.toml
+        run: uv lock --check
+      - name: Install dependencies from lockfile
+        run: uv sync --extra test --extra ui --frozen
+      # `make lint` e a fonte unica dos paths (PY_PATHS_COM_TESTS no Makefile):
+      # antes o CI re-declarava src/ ui/ relay/ scripts/ tests/... inline e o
+      # drift ja aconteceu. Roda ruff check + ruff format --check.
+      - name: Lint (make lint)
+        run: make lint
+      - name: Architecture contracts (import-linter)
+        run: uv run lint-imports
+
+  type-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install dependencies from lockfile
+        run: uv sync --extra test --extra ui --frozen
+      # `make typecheck` e a fonte unica dos paths (PY_PATHS no Makefile).
+      - name: Type-check (make typecheck)
+        run: make typecheck
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install dependencies from lockfile
+        run: uv sync --extra test --extra ui --frozen
+      # `make security` e a fonte unica dos paths (PY_PATHS no Makefile) e das
+      # flags do bandit (-c pyproject.toml --severity-level high).
+      - name: Security scan (make security)
+        run: make security
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pytstop
+          POSTGRES_PASSWORD: pytstop
+          POSTGRES_DB: pytstop_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install dependencies from lockfile
+        run: uv sync --extra test --extra ui --frozen
+      # Cobertura agregada src+relay (relay e produto deployado; RFC-002 §5).
+      # O gate de 95% e sobre o TOTAL agregado, nao por-arquivo: relay/__main__
+      # fica fora (omit no .coveragerc, so wiring E2E) e as linhas de integracao
+      # do relay sobem no step "Run integration tests". branch=True vem do
+      # .coveragerc. UI tem gate proprio no step seguinte (--cov=ui).
+      - name: Run unit tests with coverage
+        run: |
+          uv run pytest tests/unitarios/ \
+            --cov=src \
+            --cov=relay \
+            --cov-fail-under=95 \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            -x \
+            --tb=short \
+            -m "not lento"
+      - name: Run UI unit tests with separate coverage gate
+        run: |
+          uv run pytest tests/unitarios/ui/ \
+            --cov=ui \
+            --cov-report=term-missing \
+            --cov-fail-under=95 \
+            -m "not lento" \
+            -x \
+            --tb=short
+      - name: Run integration tests
+        run: |
+          set +e
+          uv run pytest tests/integracao/ \
+            -x \
+            --tb=short
+          rc=$?
+          # Exit code 5 = no tests collected (acceptable when integration suite is empty)
+          if [ $rc -eq 5 ]; then
+            echo "No integration tests found — skipping."
+            exit 0
+          fi
+          exit $rc
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  sbom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      # TD-012 (ADR-012): SBOM CycloneDX automatizado no CI. Reusa `make sbom`
+      # como fonte unica (versao do gerador pinada + comandos + validacao
+      # bomFormat vivem so no Makefile), garantindo paridade exata CI<->local.
+      - name: Gerar SBOM CycloneDX
+        run: make sbom
+      # Sem `if: always()`: so publica se `make sbom` (geracao + validacao) passar,
+      # pra nunca subir um SBOM parcial/invalido como artefato.
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 90

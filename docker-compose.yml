@@ -1,0 +1,202 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        # GIT_SHA / GIT_DATE injetadas pelo wrapper DOCKER_COMPOSE do
+        # Makefile (`GIT_SHA=$$(git rev-parse HEAD) docker compose ...`).
+        # Fallback `unknown` cobre o caso de invocacao manual (sem make).
+        GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DATE: ${GIT_DATE:-unknown}
+    # Nome fixo da imagem para o servico `relay` reusar o MESMO build (um
+    # unico build por up/rebuild em vez de dois identicos). Tag local-only,
+    # nunca publicada. Worktrees paralelos: sobrescreva APP_IMAGE no
+    # .env.dev para nao compartilhar a tag entre worktrees.
+    image: ${APP_IMAGE:-pytstop-app:dev}
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Store do rate limiter (TD-016): sobe antes do app. service_started
+      # basta -- o redis:7-alpine atende quase de imediato e o limitador
+      # conecta sob demanda (sem healthcheck dedicado, como o mailpit).
+      redis:
+        condition: service_started
+    env_file:
+      - .env.dev
+    environment:
+      # Token do canal externo de decisao de orcamento (RF-022 / ADR-021).
+      # `environment` vence `env_file` no compose: o default de demo abaixo
+      # garante o canal ativo mesmo com .env.dev copiado antes do RF-022.
+      # Para trocar, exporte ORCAMENTO_WEBHOOK_TOKEN no shell antes do
+      # `docker compose up` e mantenha .env.dev em sincronia.
+      - ORCAMENTO_WEBHOOK_TOKEN=${ORCAMENTO_WEBHOOK_TOKEN:-demo-webhook-orcamento-nao-usar-em-producao}
+      # Notificacao de status por e-mail (RF-024 / ADR-018): defaults de
+      # demo apontam para o servico mailpit abaixo, mesmo com .env.dev
+      # copiado antes do RF-024 (mesmo racional do token acima). Falha de
+      # envio nunca bloqueia a transicao — sem mailpit no ar, o app loga
+      # e segue.
+      - SMTP_HOST=${SMTP_HOST:-mailpit}
+      - SMTP_PORT=${SMTP_PORT:-1025}
+      - SMTP_FROM=${SMTP_FROM:-oficina@pytstop.local}
+      # Traces OTLP (ADR-020): default OFF — zero custo no fluxo normal.
+      # Para ligar: `OTEL_ENABLED=true docker compose --profile otel up -d`
+      # (o profile sobe o servico jaeger abaixo). Sem depends_on no jaeger:
+      # o servico e do profile e o exporter em batch apenas descarta spans
+      # enquanto o backend nao atende.
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Store do rate limiter (TD-016): default aponta para o servico redis
+      # abaixo, exercitando o limitador compartilhado no `make up`. Espelha
+      # o RATE_LIMIT_STORAGE_URI do cluster (configmap.yaml).
+      - RATE_LIMIT_STORAGE_URI=${RATE_LIMIT_STORAGE_URI:-redis://redis:6379}
+    entrypoint: ["./entrypoint.sh"]
+    # Healthcheck do app (RNF-019): probe em /api/v1/saude via Python+urllib
+    # porque a imagem slim nao tem curl/wget. Espelha o HEALTHCHECK do
+    # Dockerfile (a definicao do compose tem precedencia). "Up" do Docker
+    # significa apenas entrypoint disparado — migrations + uvicorn ainda
+    # levam segundos; com o healthcheck, `docker compose up -d --wait` e
+    # `docker compose ps` passam a refletir o app realmente atendendo.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/saude', timeout=2).status==200 else 1)"
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-pytstop}
+      - POSTGRES_USER=${POSTGRES_USER:-pytstop}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-pytstop}
+      - GIT_SHA=${GIT_SHA:-unknown}
+      - GIT_DATE=${GIT_DATE:-unknown}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Wrapper que loga SHA antes de delegar pra entrypoint default do
+    # postgres. `$$` escapa interpolacao do compose -- `$$VAR` chega como
+    # `$VAR` no string final, que bash expande em runtime usando o env
+    # passado em `environment:` acima. `:0:12` (substring bash) nao e
+    # suportado pela interpolacao do compose, daí o escape e a expansao
+    # so em runtime. `docker-entrypoint.sh` (sem path absoluto) ja esta
+    # no PATH da imagem postgres:16 -- evita acoplar a layout interno da
+    # imagem.
+    entrypoint:
+      - bash
+      - -c
+      - |
+        echo ">>> pytstop postgres | commit $${GIT_SHA:0:12} | $${GIT_DATE:-unknown}"
+        exec docker-entrypoint.sh postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pytstop}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Servidor SMTP de dev/demo (ADR-018): aceita qualquer mensagem sem
+  # credencial e exibe numa caixa de entrada web — a demo do RF-024 mostra
+  # a transicao de status e o e-mail materializado na UI. SMTP fica na
+  # rede interna do compose (porta 1025, sem publicar no host); apenas a
+  # UI web e exposta em http://localhost:8025.
+  # Relay da Transactional Outbox (RF-024/ADR-022): SEM ele a stack compose
+  # acumulava linhas pendentes na outbox e o Mailpit nunca recebia e-mail —
+  # a entrega acontece exclusivamente aqui (dispatcher sincrono congelado
+  # vazio). Mesma imagem do app; espelha o k8s/relay.yaml (paridade dev x
+  # cluster). Finding da revisao devops de fechamento.
+  relay:
+    # Reusa por referencia a imagem buildada no servico `app` (image: comum,
+    # sem build proprio): o compose builda uma unica vez e ambos os servicos
+    # sobem do mesmo artefato.
+    image: ${APP_IMAGE:-pytstop-app:dev}
+    restart: unless-stopped
+    command: ["python", "-m", "relay"]
+    entrypoint: []
+    # O HEALTHCHECK embutido na imagem proba /api/v1/saude — o relay nao
+    # serve HTTP; sem o disable o container ficaria unhealthy para sempre
+    # (no cluster a liveness e por heartbeat, k8s/relay.yaml).
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.dev
+    environment:
+      - SMTP_HOST=${SMTP_HOST:-mailpit}
+      - SMTP_PORT=${SMTP_PORT:-1025}
+      - SMTP_FROM=${SMTP_FROM:-oficina@pytstop.local}
+
+  mailpit:
+    # Tag pinada (major) — sem ela o compose flutuava no latest.
+    image: axllent/mailpit:v1.30
+    restart: unless-stopped
+    ports:
+      # Loopback only: UI de inspecao dev, nao exposta pra LAN.
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+
+  # Contador compartilhado do rate limiter (TD-016): a API usa este Redis
+  # como store unico para o limite por janela (RATE_LIMIT_STORAGE_URI no
+  # environment do app). Espelha o redis.yaml do cluster (paridade dev x
+  # cluster). Sem persistencia: os contadores sao efemeros e expiram com a
+  # janela. Porta publicada no host (loopback only) so para inspecionar
+  # (redis-cli); a comunicacao app<->redis fica na rede interna do compose.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+
+  # Backend de traces de dev/demo (diferencial ADR-020): so sobe com
+  # `--profile otel` — o fluxo normal (make up, CI, full-test) nao paga o
+  # custo. Recebe OTLP/gRPC do app na 4317 (rede interna do compose) e
+  # expoe a UI em http://localhost:16686. Ligue a instrumentacao do app
+  # com OTEL_ENABLED=true (ver environment do app acima).
+  jaeger:
+    image: jaegertracing/all-in-one:1
+    restart: unless-stopped
+    profiles: ["otel"]
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
+      # OTLP/gRPC publicado no loopback para rodar o backend FORA do docker
+      # (uvicorn local) exportando para o Jaeger do compose:
+      # OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+      - "127.0.0.1:${JAEGER_OTLP_PORT:-4317}:4317"
+
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DATE: ${GIT_DATE:-unknown}
+    ports:
+      - "${UI_PORT:-8080}:8080"
+    depends_on:
+      app:
+        # Promovido de service_started para service_healthy (RNF-019): a ui
+        # so e criada com o backend de fato atendendo, habilitando
+        # `docker compose up -d --wait`.
+        # Custo medido no boot frio: ~3-5s (engine 25+ proba a cada 5s
+        # durante o start_period via start_interval default; so em engines
+        # pre-25 o primeiro probe cairia no interval de 30s). O fluxo do
+        # reset-db nao muda: o poll de /api/v1/saude via curl do host passa
+        # na primeira tentativa.
+        condition: service_healthy
+    environment:
+      - BACKEND_URL=http://app:8000
+      - UI_PORT=8080
+
+volumes:
+  postgres_data:

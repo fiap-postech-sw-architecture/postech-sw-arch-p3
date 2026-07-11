@@ -1,0 +1,78 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.eggs/
+*.egg-info/
+*.egg
+dist/
+build/
+
+.venv/
+venv/
+.env
+.env.dev
+.env.cloud
+
+# Demo em VM + k3s (ADR-025 adendo): chave SSH dedicada + kubeconfig exportado
+.vm-demo-ssh
+.vm-demo-ssh.pub
+.kube-vm-config
+.vm-demo-known_hosts
+
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mutmut-cache
+
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# NiceGUI runtime storage (app.storage dumps)
+.nicegui/
+
+# Screenshots de E2E (Task 5.8a) — relatorio descritivo em jornadas.md.
+tests/e2e_ui/screenshots/*.png
+!tests/e2e_ui/screenshots/.gitkeep
+
+# Playwright MCP debug session artifacts (screenshots, console logs, page snapshots)
+.playwright-mcp/
+
+# Claude Code local state
+.claude/scheduled_tasks.lock
+
+# Ad-hoc UI screenshots dropped at repo root by manual sessions
+/dialog-*.png
+/orcamento-*.png
+/os-*.png
+/seed-*.png
+/clientes-*.png
+/estoque-*.png
+/cliente-expandido.png
+
+# Local AI agent plans (kept under ~/.claude/plans/, not in repo)
+docs/superpowers/plans/
+
+# Arquivos de log gerados pelo Uvicorn/FastAPI
+*.log
+logs/
+
+# Intermediario do pandoc para PDF da entrega (links absolutos)
+docs/entrega/*.absolute-links.md
+
+# Mac OS
+**/.DS_Store
+
+# SBOM gerado (TD-012): artefato de build, muda a cada lockfile — o CI publica
+sbom.cdx.json
+sbom-requirements.txt
+
+# Relatorios do OWASP ZAP baseline (TD-011): artefatos de build gerados pelo
+# `make dast`/CI a cada run — o CI os publica como artefato `zap-dast-report`.
+# As regras (.zap/rules.tsv) sao versionadas; so os relatorios sao ignorados.
+.zap/zap-report.*

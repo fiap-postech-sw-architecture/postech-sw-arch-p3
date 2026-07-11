@@ -1,0 +1,184 @@
+# CD da fase 2 (RNF-022; ADR-019): push na main publica a imagem da API no
+# GHCR com tag imutavel por SHA e faz deploy em cluster kind efemero criado
+# no proprio runner (terraform apply de /infra + manifests de /k8s + smoke
+# test). PRs mantem apenas a CI (ci.yml); `workflow_dispatch` permite
+# reexecutar o deploy sob demanda (ex.: gravacao do video da entrega).
+#
+# O fluxo local equivalente e `make cd-local` -- o pipeline executa o que o
+# desenvolvedor executa (DevOps, Aula 03). Mantenha os dois espelhados.
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# GITHUB_TOKEN efemero do job e a unica credencial: packages:write cobre o
+# push/pull no GHCR; o cluster nasce no runner e o kubeconfig sai do
+# terraform apply (ADR-019).
+permissions:
+  contents: read
+  packages: write
+
+# Um deploy por vez, sem cancelar o que ja esta em andamento: a main
+# converge para o ultimo push assim que a fila drena.
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      ui_tag: ${{ steps.meta.outputs.ui_tag }}
+    steps:
+      - uses: actions/checkout@v7
+      # GHCR exige owner/repo em lowercase -- `${VAR,,}` normaliza. A UI e uma
+      # imagem separada (ui/Dockerfile), com o mesmo SHA e sufixo -ui.
+      - id: meta
+        name: Compute image tags
+        run: |
+          echo "tag=ghcr.io/${GITHUB_REPOSITORY,,}-app:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "ui_tag=ghcr.io/${GITHUB_REPOSITORY,,}-ui:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # GIT_SHA/GIT_DATE viram LABEL OCI + env PYTSTOP_GIT_* na imagem
+      # (mesmos build args do compose e do `make k8s-up`).
+      - name: Build images
+        run: |
+          BUILD_DATE="$(git show -s --format=%cI HEAD)"
+          docker build -t "${{ steps.meta.outputs.tag }}" \
+            --build-arg GIT_SHA="${GITHUB_SHA}" \
+            --build-arg GIT_DATE="${BUILD_DATE}" .
+          docker build -f ui/Dockerfile -t "${{ steps.meta.outputs.ui_tag }}" \
+            --build-arg GIT_SHA="${GITHUB_SHA}" \
+            --build-arg GIT_DATE="${BUILD_DATE}" .
+      - name: Push images
+        run: |
+          docker push "${{ steps.meta.outputs.tag }}"
+          docker push "${{ steps.meta.outputs.ui_tag }}"
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+      # Instala so o binario do kind (sem criar cluster): quem cria o
+      # cluster e o terraform de /infra; o CLI e usado pelo `kind load`.
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+      # Cria cluster kind `pytstop` + PostgreSQL (ADR-016/ADR-017). O
+      # provider tehcyx/kind mescla o contexto kind-pytstop no kubeconfig
+      # do runner; o use-context fixa explicitamente o alvo dos kubectl.
+      - name: Provision cluster and database (Terraform)
+        run: |
+          terraform -chdir=infra init -input=false
+          terraform -chdir=infra apply -auto-approve -input=false
+          kubectl config use-context kind-pytstop
+      # O repositorio GHCR e privado: o pull da imagem recem-publicada
+      # exige login com o GITHUB_TOKEN tambem neste job.
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # `kind load` injeta a imagem nos nos -- sem imagePullSecret no
+      # cluster (ADR-019; RFC-002 §4).
+      - name: Load images into kind
+        run: |
+          docker pull "${{ needs.image.outputs.tag }}"
+          kind load docker-image "${{ needs.image.outputs.tag }}" --name pytstop
+          docker pull "${{ needs.image.outputs.ui_tag }}"
+          kind load docker-image "${{ needs.image.outputs.ui_tag }}" --name pytstop
+      # metrics-server alimenta o HPA (RNF-023). `--kubelet-insecure-tls`
+      # e o ajuste padrao para kind (certificados do kubelet sem SAN de
+      # IP); o guard do grep torna o patch idempotente. A URL `latest` e
+      # mutavel — tradeoff deliberado num cluster efemero de demonstracao
+      # (pin por versao/digest fica para um alvo persistente).
+      - name: Install metrics-server
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+          kubectl -n kube-system get deployment metrics-server -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q kubelet-insecure-tls || \
+            kubectl patch deployment metrics-server -n kube-system --type json \
+              -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+      # Ordem obrigatoria (ADR-019: schema em head antes de qualquer replica
+      # subir): (a) namespace + config/secret + servicos de apoio; (b) Job de
+      # migracao + wait com falha rapida; (c) SO ENTAO deployment/relay (as
+      # cargas da aplicacao). O glob e separado em dois grupos: TUDO MENOS
+      # deployment.yaml/relay.yaml entra antes do Job; deployment/relay entram
+      # depois que a migracao conclui com sucesso. Cada manifest entra JA com a
+      # tag imutavel do SHA (mesmo `sed` do Job) -- deployment/relay nunca
+      # passam pela tag `dev`, eliminando o antigo `kubectl set image` e a
+      # janela em que os pods puxavam uma tag inexistente. O glob k8s/*.yaml
+      # nao desce em k8s/jobs/ (aplicado a parte). ESTE BLOCO E ESPELHADO EM
+      # `make k8s-up` (Makefile, alvo k8s-up/cd-local) -- altere os dois juntos.
+      - name: Deploy app manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          # (a) Apoio primeiro: tudo menos deployment.yaml/relay.yaml (as
+          # cargas da app, que so podem subir depois da migracao).
+          # O ui-deployment.yaml (apoio) tambem carrega a tag `dev`, com sufixo
+          # -ui -- o sed troca as duas tags de uma vez.
+          for manifest in k8s/*.yaml; do
+            case "$manifest" in
+              k8s/deployment.yaml|k8s/relay.yaml) continue ;;
+            esac
+            sed -e "s|ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p2-app:dev|${{ needs.image.outputs.tag }}|" \
+                -e "s|ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p2-ui:dev|${{ needs.image.outputs.ui_tag }}|" "$manifest" | kubectl apply -f -
+          done
+          # (b) Migracao via Job dedicado antes do rollout (TD-015): resolve a corrida com N replicas
+          kubectl -n pytstop delete job pytstop-migrate --ignore-not-found
+          sed "s|ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p2-app:dev|${{ needs.image.outputs.tag }}|" k8s/jobs/migration-job.yaml | kubectl -n pytstop apply -f -
+          # Espera com falha rapida: watchers de `complete` e `failed` em
+          # paralelo + `wait -n` -- um Job que esgota o backoffLimit aborta o
+          # deploy em segundos, em vez de segurar os 180s do timeout do
+          # `complete`. O arbitro do desfecho e o status real do Job
+          # (`.status.succeeded`). `make k8s-up` espelha a logica com poll
+          # portavel (`wait -n` nao existe no dash nem no bash 3.2 do macOS).
+          kubectl -n pytstop wait --for=condition=complete --timeout=180s job/pytstop-migrate & ok=$!
+          kubectl -n pytstop wait --for=condition=failed --timeout=180s job/pytstop-migrate 2>/dev/null & bad=$!
+          wait -n "$ok" "$bad" || true
+          kill "$ok" "$bad" 2>/dev/null || true
+          if [ "$(kubectl -n pytstop get job pytstop-migrate -o jsonpath='{.status.succeeded}')" != "1" ]; then
+            echo "::error::Migracao (pytstop-migrate) falhou ou expirou; abortando o deploy antes do rollout."
+            kubectl -n pytstop logs job/pytstop-migrate --tail=50 || true
+            exit 1
+          fi
+          # (c) So agora as cargas da app: schema ja esta em head.
+          for manifest in k8s/deployment.yaml k8s/relay.yaml; do
+            sed "s|ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p2-app:dev|${{ needs.image.outputs.tag }}|" "$manifest" | kubectl apply -f -
+          done
+          kubectl -n pytstop rollout status deployment/pytstop-api --timeout=300s
+          kubectl -n pytstop rollout status deployment/pytstop-relay --timeout=300s
+          # A UI e a superficie de demo deste deploy: aguarda o rollout dela
+          # tambem, para o CD nao ficar verde com a UI 0/1 (crashloop/probe).
+          kubectl -n pytstop rollout status deployment/pytstop-ui --timeout=300s
+      # Porta local 18000 para casar com o `make k8s-smoke` (que evita
+      # colisao com a stack compose em 8000 na maquina do dev).
+      - name: Smoke test
+        run: |
+          kubectl -n pytstop port-forward svc/pytstop-api 18000:8000 &
+          pf=$!
+          # Paridade com make k8s-smoke: encerra o port-forward na saida do
+          # step (sem processo orfao segurando a porta no runner).
+          trap 'kill "$pf" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:18000/api/v1/saude; then
+              echo
+              echo "smoke OK"
+              exit 0
+            fi
+            sleep 2
+          done
+          kubectl -n pytstop logs deploy/pytstop-api --tail=50
+          exit 1
