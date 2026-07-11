@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch: # disparo manual (Desbloqueio 2: gh workflow run ci.yml)
   push:
     branches: [main]
   pull_request:

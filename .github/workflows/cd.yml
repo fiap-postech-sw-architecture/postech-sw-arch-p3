@@ -213,7 +213,7 @@ jobs:
     environment: ${{ github.ref_name == 'main' && 'producao' || 'homologacao' }}
     env:
       AWS_REGION: us-east-1 # regiao fixa do Learner Lab (ADR-026)
-      EKS_CLUSTER: ${{ vars.EKS_CLUSTER_NAME || 'pytstop' }} # nome definido no Terraform do p3-infra-k8s
+      EKS_CLUSTER: ${{ vars.EKS_CLUSTER_NAME || 'pytstop-p3' }} # nome definido no Terraform do p3-infra-k8s
     steps:
       - uses: actions/checkout@v7
       # O contexto `secrets` nao existe em `if` de job — o gate vira output
