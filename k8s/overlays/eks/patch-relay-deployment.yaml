@@ -1,0 +1,20 @@
+# EKS: mesma dupla do patch da API — pull no GHCR privado + DATABASE_URL do
+# RDS via Secret postgres-credentials (env vence o envFrom de demo).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pytstop-relay
+  namespace: pytstop
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-credentials
+      containers:
+        - name: relay
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: DATABASE_URL

@@ -1,0 +1,12 @@
+# EKS: a UI tambem vem do GHCR privado (imagem -ui) — precisa do pull secret.
+# Sem mudanca de banco: a UI so fala HTTP com a API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pytstop-ui
+  namespace: pytstop
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-credentials

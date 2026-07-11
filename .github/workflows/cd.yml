@@ -1,16 +1,27 @@
-# CD da fase 2 (RNF-022; ADR-019): push na main publica a imagem da API no
-# GHCR com tag imutavel por SHA e faz deploy em cluster kind efemero criado
-# no proprio runner (terraform apply de /infra + manifests de /k8s + smoke
-# test). PRs mantem apenas a CI (ci.yml); `workflow_dispatch` permite
-# reexecutar o deploy sob demanda (ex.: gravacao do video da entrega).
+# CD da fase 3 (RNF-025; ADR-033): deploy automatico por branch — push em
+# `homolog` publica a imagem e implanta no ambiente **homologacao**; push em
+# `main`, no ambiente **producao**. Dois alvos por ambiente:
+#   - kind efemero no runner (job `deploy`, herdado da fase 2/ADR-019):
+#     valida os manifests e o fluxo completo sem custo, espelho do
+#     `make cd-local` — mantenha os dois sincronizados;
+#   - EKS (job `deploy-eks`, ADR-030): overlay k8s/overlays/eks, executado
+#     APENAS quando os secrets AWS estao configurados (sem eles o job vira
+#     no-op) — o cluster vem do repo p3-infra-k8s e o RDS do p3-infra-db,
+#     na ordem de deploy multi-repo do ADR-033.
 #
-# O fluxo local equivalente e `make cd-local` -- o pipeline executa o que o
-# desenvolvedor executa (DevOps, Aula 03). Mantenha os dois espelhados.
+# ATENCAO (estado operacional — ADR-033/gap analysis §5):
+#   - COTA DO GITHUB ACTIONS ESGOTADA: este workflow esta commitado e correto,
+#     mas nao executavel ate a renovacao da cota. Gate local espelho
+#     obrigatorio antes de cada push (`make check` + `make cd-local`).
+#   - CREDENCIAIS AWS ACADEMY ROTATIVAS (~4h por sessao): os secrets
+#     AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN devem ser
+#     re-gravados a cada Start Lab — runbook `aws-academy-setup.md` no repo
+#     postech-sw-arch-p3-docs. Credencial vencida = deploy-eks falha no login.
 name: CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, homolog]
   workflow_dispatch:
 
 # GITHUB_TOKEN efemero do job e a unica credencial: packages:write cobre o
@@ -20,10 +31,11 @@ permissions:
   contents: read
   packages: write
 
-# Um deploy por vez, sem cancelar o que ja esta em andamento: a main
-# converge para o ultimo push assim que a fila drena.
+# Um deploy por vez POR BRANCH (main e homolog nao se serializam entre si),
+# sem cancelar o que ja esta em andamento: cada branch converge para o
+# ultimo push assim que a fila drena.
 concurrency:
-  group: cd-main
+  group: cd-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -181,4 +193,104 @@ jobs:
             sleep 2
           done
           kubectl -n pytstop logs deploy/pytstop-api --tail=50
+          exit 1
+
+  # Deploy cloud no EKS (ADR-030/ADR-033): overlay k8s/overlays/eks sobre o
+  # cluster provisionado pelo repo p3-infra-k8s, banco no RDS do p3-infra-db.
+  # `environment` mapeia a branch ao ambiente exigido pelo challenge
+  # (homolog -> homologacao, main -> producao). Sem os secrets AWS gravados
+  # (sessao do Academy fechada), todos os passos viram no-op e o job termina
+  # verde — o kind (job `deploy`) segue validando o fluxo.
+  deploy-eks:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ github.ref_name == 'main' && 'producao' || 'homologacao' }}
+    env:
+      AWS_REGION: us-east-1 # regiao fixa do Learner Lab (ADR-026)
+      EKS_CLUSTER: ${{ vars.EKS_CLUSTER_NAME || 'pytstop' }} # nome definido no Terraform do p3-infra-k8s
+    steps:
+      - uses: actions/checkout@v7
+      # O contexto `secrets` nao existe em `if` de job — o gate vira output
+      # de step. Secrets ausentes = sessao do Academy fechada = pular a AWS.
+      - id: aws
+        name: Check AWS credentials
+        run: echo "enabled=${{ secrets.AWS_ACCESS_KEY_ID != '' }}" >> "$GITHUB_OUTPUT"
+      # Credenciais rotativas do Academy (access key + secret + session
+      # token), re-gravadas a cada Start Lab — runbook aws-academy-setup.md
+      # (repo p3-docs). OIDC e inviavel no Learner Lab (ADR-033).
+      - if: steps.aws.outputs.enabled == 'true'
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - if: steps.aws.outputs.enabled == 'true'
+        name: Configure kubeconfig (EKS)
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+      # Secrets fora do overlay (ver k8s/overlays/eks/kustomization.yaml):
+      # postgres-credentials carrega o DATABASE_URL com o endpoint do RDS
+      # (output do terraform do p3-infra-db, gravado no secret RDS_DATABASE_URL
+      # deste repo); ghcr-credentials autoriza o pull das imagens no GHCR
+      # privado. GHCR_PULL_TOKEN e um PAT read:packages — o GITHUB_TOKEN de
+      # fallback expira com o job, entao pulls posteriores (HPA/reschedule)
+      # exigem o PAT.
+      - if: steps.aws.outputs.enabled == 'true'
+        name: Create runtime secrets
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl -n pytstop create secret generic postgres-credentials \
+            --from-literal=DATABASE_URL='${{ secrets.RDS_DATABASE_URL }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n pytstop create secret docker-registry ghcr-credentials \
+            --docker-server=ghcr.io \
+            --docker-username='${{ github.actor }}' \
+            --docker-password='${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+      # Mesma ordem do fluxo kind (TD-026: migracao ANTES do rollout), mas
+      # via kustomize: renderiza o overlay uma vez com a tag imutavel do SHA
+      # e aplica em tres passes por label — (a) apoio, (b) Job de migracao +
+      # wait com falha rapida, (c) cargas da app. `notin` casa tambem os
+      # recursos sem o label `app` (namespace, config, RBAC do monitoramento).
+      - if: steps.aws.outputs.enabled == 'true'
+        name: Deploy app manifests (EKS overlay)
+        run: |
+          sed -i "s|newTag: dev|newTag: ${GITHUB_SHA}|" k8s/overlays/eks/kustomization.yaml
+          kubectl kustomize --load-restrictor=LoadRestrictionsNone k8s/overlays/eks > /tmp/eks-rendered.yaml
+          # (a) apoio: tudo menos migracao e cargas da app
+          kubectl apply -f /tmp/eks-rendered.yaml -l 'app notin (pytstop-api,pytstop-relay,pytstop-migrate)'
+          # (b) migracao no RDS, gate do rollout (mesmo padrao do job deploy)
+          kubectl -n pytstop delete job pytstop-migrate --ignore-not-found
+          kubectl apply -f /tmp/eks-rendered.yaml -l 'app=pytstop-migrate'
+          kubectl -n pytstop wait --for=condition=complete --timeout=180s job/pytstop-migrate & ok=$!
+          kubectl -n pytstop wait --for=condition=failed --timeout=180s job/pytstop-migrate 2>/dev/null & bad=$!
+          wait -n "$ok" "$bad" || true
+          kill "$ok" "$bad" 2>/dev/null || true
+          if [ "$(kubectl -n pytstop get job pytstop-migrate -o jsonpath='{.status.succeeded}')" != "1" ]; then
+            echo "::error::Migracao (pytstop-migrate) falhou ou expirou; abortando o deploy antes do rollout."
+            kubectl -n pytstop logs job/pytstop-migrate --tail=50 || true
+            exit 1
+          fi
+          # (c) cargas da app: schema ja em head
+          kubectl apply -f /tmp/eks-rendered.yaml -l 'app in (pytstop-api,pytstop-relay)'
+          kubectl -n pytstop rollout status deployment/pytstop-api --timeout=300s
+          kubectl -n pytstop rollout status deployment/pytstop-relay --timeout=300s
+          kubectl -n pytstop rollout status deployment/pytstop-ui --timeout=300s
+      # O Service pytstop-api e LoadBalancer no overlay (endpoint publico que
+      # o API Gateway do p3-lambda consome). O NLB/CLB pode levar minutos
+      # para nascer e resolver DNS — o loop tolera isso.
+      - if: steps.aws.outputs.enabled == 'true'
+        name: Smoke test (LoadBalancer)
+        run: |
+          for _ in $(seq 1 30); do
+            LB="$(kubectl -n pytstop get svc pytstop-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+            if [ -n "$LB" ] && curl -fsS --max-time 5 "http://${LB}:8000/api/v1/saude"; then
+              echo
+              echo "smoke OK: http://${LB}:8000"
+              exit 0
+            fi
+            sleep 10
+          done
+          kubectl -n pytstop logs deploy/pytstop-api --tail=50 || true
           exit 1

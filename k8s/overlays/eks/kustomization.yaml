@@ -1,0 +1,93 @@
+# Overlay EKS (ADR-030) — deploy cloud da fase 3.
+#
+# Reusa os manifests da base k8s/ por caminho relativo, SEM kustomization.yaml
+# na base — assim o `kubectl apply -f k8s/*.yaml` do fluxo kind (make k8s-up /
+# cd.yml) segue intocado. Como os arquivos ficam acima do overlay, o build
+# exige relaxar o load restrictor (mesmo padrao do overlay cloud da fase 2):
+#
+#   kubectl kustomize --load-restrictor=LoadRestrictionsNone k8s/overlays/eks
+#
+# Diferencas em relacao ao kind:
+#
+#   - IMAGENS via GHCR (transformer `images` abaixo): no EKS nao existe
+#     `kind load` — os nos fazem pull do registry. Sao as MESMAS imagens que
+#     o job `image` do cd.yml publica (ghcr.io/<owner>/<repo>-app|-ui, tag =
+#     SHA do commit). O placeholder `dev` e substituido pelo CD (sed no
+#     newTag). O GHCR e privado: os patches adicionam `imagePullSecrets:
+#     ghcr-credentials` (criacao abaixo).
+#   - API exposta por Service LoadBalancer (patch-api-service.yaml): e o
+#     endpoint publico que o API Gateway consome (RFC-003 §2 — VPC Link ×
+#     endpoint publico e detalhamento; adotado o endpoint publico via NLB/CLB).
+#   - BANCO = RDS (ADR-031), NAO ha Postgres in-cluster: a base k8s/ nao traz
+#     StatefulSet de banco (no kind ele vem do Terraform de /infra, que nao
+#     roda no EKS), entao nada a remover — os patches apenas apontam
+#     DATABASE_URL para o Secret `postgres-credentials` (env explicito vence
+#     o envFrom do pytstop-secrets de demo).
+#   - metrics-server NAO e aplicado aqui: no EKS ele vem como addon do
+#     provisionamento do cluster (repo p3-infra-k8s, ADR-030); o install
+#     manual e' passo exclusivo do fluxo kind.
+#
+# SECRETS criados FORA do overlay (manualmente ou pelo pipeline — cd.yml, job
+# deploy-eks), antes do apply:
+#
+#   # endpoint do RDS provisionado pelo repo p3-infra-db (ADR-031)
+#   kubectl -n pytstop create secret generic postgres-credentials \
+#     --from-literal=DATABASE_URL="postgresql://<user>:<senha>@<endpoint-rds>:5432/pytstop" \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+#   # pull do GHCR privado (PAT com read:packages)
+#   kubectl -n pytstop create secret docker-registry ghcr-credentials \
+#     --docker-server=ghcr.io --docker-username=<user> --docker-password=<PAT> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# ORDEM DE APPLY (TD-026 — migracao antes do rollout): o pipeline renderiza
+# uma vez (`kubectl kustomize k8s/overlays/eks`) e aplica em tres passes por
+# label: (a) apoio (`app notin (pytstop-api,pytstop-relay,pytstop-migrate)`);
+# (b) Job de migracao + wait; (c) api + relay. Ver cd.yml, job deploy-eks.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../namespace.yaml
+  - ../../configmap.yaml
+  # Secret de DEMO da base (JWT_SECRET, ENCRYPTION_KEY, admin...): mantido —
+  # o cluster EKS e ambiente de demonstracao academica, como o kind. So o
+  # DATABASE_URL e sobrescrito (postgres-credentials, patches abaixo).
+  - ../../secret.yaml
+  - ../../service.yaml
+  - ../../hpa.yaml
+  - ../../deployment.yaml
+  - ../../relay.yaml
+  - ../../redis.yaml
+  - ../../mailpit.yaml
+  - ../../jaeger.yaml
+  - ../../prometheus.yaml
+  - ../../grafana.yaml
+  - ../../loki.yaml
+  - ../../promtail.yaml
+  - ../../kube-state-metrics.yaml
+  - ../../ui-configmap.yaml
+  - ../../ui-deployment.yaml
+  - ../../ui-service.yaml
+  # Job de migracao incluido no render (diferente do fluxo kind, que o aplica
+  # por sed): os patches de imagem/env valem para ele tambem. O pipeline o
+  # aplica num passe proprio, antes das cargas da app (ordem acima).
+  - ../../jobs/migration-job.yaml
+
+# Mesmas imagens do CI (cd.yml, job `image`): ghcr.io/<owner>/<repo>-app e
+# ghcr.io/<owner>/<repo>-ui. `newTag: dev` e placeholder — o CD troca pela
+# tag imutavel do SHA (sed "s|newTag: dev|newTag: <sha>|").
+images:
+  - name: ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p2-app
+    newName: ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p3-app
+    newTag: dev
+  - name: ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p2-ui
+    newName: ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p3-ui
+    newTag: dev
+
+patches:
+  - path: patch-api-service.yaml
+  - path: patch-api-deployment.yaml
+  - path: patch-relay-deployment.yaml
+  - path: patch-migration-job.yaml
+  - path: patch-ui-deployment.yaml
