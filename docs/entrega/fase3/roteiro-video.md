@@ -13,16 +13,11 @@ Duração alvo: ~13min (folga dentro do limite de 15 min — a soma dos blocos a
 - `make k8s-down` se houver cluster de sessão anterior (o bloco 3 grava o provisionamento do zero);
 - Docker com memória suficiente para o cluster completo (no Colima: `colima start --memory 4`);
 - clonar os repos irmãos (`postech-sw-arch-p3-lambda` ao lado do `p3`); no lambda: `uv sync` + SAM CLI instalado;
-- criar o `env.json` do SAM com os segredos de demo do app ([`k8s/secret.yaml`](../../../k8s/secret.yaml)), para o token da lambda ser aceito pelo app:
+- criar o `env.json` do SAM com os segredos de demo do app (mesmos valores de [`k8s/secret.yaml`](../../../k8s/secret.yaml), para o token da lambda ser aceito pelo app; `DATABASE_URL` aponta para `host.docker.internal:15432` — o port-forward do bloco 2):
 
-  ```json
-  {
-    "AutenticacaoCpfFunction": {
-      "DATABASE_URL": "postgresql://pytstop:pytstop-demo@host.docker.internal:5432/pytstop",
-      "JWT_SECRET": "demo-jwt-secret-pytstop-fase2-no-minimo-32-bytes",
-      "ENCRYPTION_KEY": "C9I0jOzZ9kJBTY0akV3TvBO2wa1JcuAdR-Wctnzee6I="
-    }
-  }
+  ```bash
+  # no repo postech-sw-arch-p3-lambda:
+  cp env.json.example env.json
   ```
 
 - abas prontas no browser: README do repo `p3`, aba Actions (ou terminal do gate local), Grafana (`localhost:3000`), Jaeger (`localhost:16686`);
@@ -45,11 +40,13 @@ Duração alvo: ~13min (folga dentro do limite de 15 min — a soma dos blocos a
 **Caminho local (SAM + app no kind)** — com o cluster do bloco 3 já de pé no ensaio (a gravação pode inverter a ordem de captura; na edição este bloco vem primeiro):
 
 ```bash
-# expor o Postgres do cluster para a lambda (terminal separado, deixar rodando):
-kubectl --context kind-pytstop -n pytstop-infra port-forward svc/postgres 5432:5432
+# expor o Postgres do cluster para a lambda (terminal separado, deixar rodando;
+# 15432 evita colisão com um Postgres local em 5432 — mesma porta do env.json):
+kubectl --context kind-pytstop -n pytstop-infra port-forward svc/postgres 15432:5432
 
-# no repo postech-sw-arch-p3-lambda — gateway emulado + function (runtime real python3.13):
-sam local start-api --env-vars env.json
+# no repo postech-sw-arch-p3-lambda — gateway emulado + function (runtime real python3.13;
+# o alvo empacota as deps em build/lambda e usa env.json):
+make sam-local
 
 # CPF de cliente ativo → 200 com JWT:
 curl -s -X POST http://localhost:3000/auth -H "Content-Type: application/json" \
@@ -140,7 +137,8 @@ Port-forward do Grafana (deixar rodando) e gerar carga + dados de negócio:
 kubectl --context kind-pytstop -n pytstop port-forward svc/grafana 3000:3000
 
 # dados de negócio (7 clientes, 10 veículos, 8 OS em estados variados) via API do cluster:
-BACKEND_URL=http://localhost:18000 make seed-demo
+ADMIN_PASSWORD=$(kubectl --context kind-pytstop -n pytstop get secret pytstop-secrets -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d) \
+  ADMIN_EMAIL=admin@pytstop.dev BACKEND_URL=http://localhost:18000 make seed-demo
 
 # carga contínua para os painéis de latência/tráfego (deixar rodando durante o bloco):
 while true; do curl -s -o /dev/null http://localhost:18000/api/v1/saude; sleep 0.2; done
@@ -162,7 +160,7 @@ Capturar um `request_id` real e persegui-lo nas duas vistas:
 
 ```bash
 # capturar o token interno uma vez (sem digitação ao vivo):
-TOKEN_INTERNO=$(curl -s -X POST http://localhost:18000/api/v1/autenticacao/login -H "Content-Type: application/json" -d '{"email":"admin@pytstop.com.br","senha":"<senha de demo>"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+TOKEN_INTERNO=$(curl -s -X POST http://localhost:18000/api/v1/autenticacao/login -H "Content-Type: application/json" -d '{"email":"admin@pytstop.dev","senha":"<senha de demo>"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 # o middleware devolve o X-Request-ID (aceita o id externo do gateway — RNF-029):
 curl -si http://localhost:18000/api/v1/ordens-de-servico/ \
