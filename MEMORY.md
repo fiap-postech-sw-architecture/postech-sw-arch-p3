@@ -73,6 +73,8 @@ Updated by AI agents at task end per `postech-ai-helper/ai/canonical/task-end-re
 
 ## Gotchas
 
+- 2026-07-11 - Branch protection INDISPONIVEL: org free + repos privados (HTTP 403 'Upgrade to GitHub Pro') — vale para os 4 repos da fase 3 E para o p2 desde a fase 2. Mitigacao: convencao de PR obrigatorio (fluxo canonico) documentada; opcoes reais: upgrade Team ou repos publicos na entrega. Branches homolog criadas nos 4 repos (cd.yml: homolog=homologacao, main=producao).
+
 - 2026-07-11 - Deteccao de transicao de OS sem coluna extra: no `before_flush`, `_status` (atributo puro do dominio) diverge de `_status_valor` (coluna mapeada) exatamente no flush que persiste a transicao — o sync `_status -> _status_valor` roda nos `before_insert/before_update` do mapping, DURANTE o flush, depois do `before_flush`. E a duracao vem da history de `_atualizado_em` (committed vs novo). Cuidado correlato: sqlite devolve `DateTime(timezone=True)` NAIVE (Postgres devolve aware) — listener que subtrai datetimes precisa normalizar tz ou quebra so nos testes.
 - 2026-07-02 - Fixture `screen` do NiceGUI 3 (main_file) corrompe `sys.modules['ui']` apos rodar: deixa stub sem `__file__` no lugar do pacote do projeto e `monkeypatch.setattr("ui...")` de testes seguintes na MESMA sessao falha com AttributeError (13 testes). Guard: fixture autouse `_preservar_sys_modules_ui` em tests/unitarios/ui/conftest.py (snapshot/restore) + test_isolamento_modulos.py
 
