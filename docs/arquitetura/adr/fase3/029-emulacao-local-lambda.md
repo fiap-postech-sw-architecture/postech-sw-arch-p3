@@ -93,5 +93,13 @@ Adotar **duas camadas de execução local**, com papéis distintos:
 * Fichamento do módulo Serverless (repo `postech-sw-arch-p3-docs`, `docs/superpowers/research/serverless.md`): SAM CLI com emulação local e Docker como pré-requisito (aula 06); ausência de LocalStack/serverless-offline/RIE no material; ressalva de acoplamento do SAM com a AWS (aula 06, apontada duas vezes)
 * Riscos da conta Academy e exigência de paridade local: [gap analysis da fase 3](../../../requisitos/fase3/gap-analysis-fase-3.md), §5
 * A cobertura ≥95% herdada do app (`.coveragerc`) vale para o repo lambda desde o primeiro commit — os testes pytest desta decisão são o que a sustenta
+## Adendo (2026-07-11) — authorizer local via SAM e reavaliação do LocalStack
+
+Dois fatos surgiram depois da decisão, na super-revisão da fase:
+
+1. **`sam local start-api` suporta Lambda authorizer** (SAM CLI >= 1.80; verificado na 1.163.0 instalada nesta máquina). A premissa deste ADR e do [ADR-027](027-api-gateway-aws.md) — de que o par gateway+authorizer não tinha emulação local e a paridade seria "parcial aceita" — estava desatualizada. Decisão complementar: o `template.yaml` passa a declarar também uma rota protegida com o authorizer, e a demo local exercita o 401/200 do gateway emulado. A tabela de paridade do RFC-003 §3 muda quando isso estiver implementado e testado.
+2. **LocalStack reavaliado a pedido do usuário**: continua rejeitado, com razão atualizada — na edição Community (gratuita) o API Gateway v2 (HTTP API) e authorizers são recurso Pro; a peça que falta é exatamente a que não é emulada de graça. EKS/RDS emulados seriam piores que o kind/Postgres reais já em uso; o ganho residual (rodar `terraform apply` da function contra endpoint local via `tflocal`) é marginal frente ao `sam validate` + apply real no Academy.
+
+Lição de processo registrada no MEMORY: instrução executável documentada precisa de execução comprovada ao menos uma vez — "SAM não instalado" ficou como nota de rodapé do bootstrap e nenhuma revisão a promoveu a ação.
 
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

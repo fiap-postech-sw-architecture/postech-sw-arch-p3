@@ -100,3 +100,8 @@ Updated by AI agents at task end per `postech-ai-helper/ai/canonical/task-end-re
 
 ## Code Quality (CodeQL) — gate pre-PR
 Antes de abrir um PR que ALTERA codigo Python, rode `make codeql-quality` e garanta **0 findings ativos** (o script sai != 0 se sobrar). Para cada finding novo: (1) corrija se for bug real; (2) suprima na linha com `# codeql[<regra>]` + razao se for FP pontual; (3) desabilite a regra em `.github/codeql/codeql-config.yml` (`query-filters`) ou ignore o path (`paths-ignore`) se a regra nao fizer sentido pro projeto. Nao abra PR com o gate vermelho. Detalhes: `scripts/codeql_quality.py`, `scripts/README.md`.
+
+## Review lessons
+
+- 2026-07-11 - GAP DE EXECUCAO escapou de 7 revisores + 2 pedidos explicitos de teste: `sam local`/demo integrada documentados mas NUNCA executados (SAM nem instalado). 3 causas: (1) "rodar testes" foi operacionalizado como "rodar suites" — instrucao manual documentada nao entrou na definicao; (2) pendencia reportada por subagente ("SAM CLI nao instalado") ficou em nota de rodape e nao virou task; (3) o Judge derruba finding que re-litiga tradeoff aceito — protegeu a premissa desatualizada do ADR-027/029 ("authorizer sem emulacao local"), quando `sam local start-api` suporta authorizer desde a v1.80. Regras novas: (a) toda instrucao executavel documentada precisa de execucao comprovada >=1x antes de "done"; (b) pendencia de subagente vira task rastreada; (c) premissa FACTUAL de ADR verificavel sem custo deve ser verificada no review deep — desafiar premissas nao e re-litigar tradeoff.
+

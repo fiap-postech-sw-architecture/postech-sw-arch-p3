@@ -84,5 +84,8 @@ Adotar o **Amazon API Gateway, no modo HTTP API**, como o gateway da fase 3:
 
 * Fichamentos citados, no repo `postech-sw-arch-p3-docs`: `docs/superpowers/research/serverless.md` (aulas 02, 04, 05, 06) e `docs/superpowers/research/api-gateway.md` (aulas 04–06, Kong)
 * RF-026, RN-021 e o estado atual da proteção de rotas no app: [gap analysis da fase 3](../../../requisitos/fase3/gap-analysis-fase-3.md)
+## Adendo (2026-07-11) — paridade local do gateway deixa de ser parcial
+
+O `sam local start-api` (SAM CLI >= 1.80) suporta Lambda authorizer — detalhe ausente do material da disciplina e não verificado quando este ADR aceitou a paridade local "parcial" (roteamento e authorizer sem emulação). Com isso, a rota protegida do gateway também é demonstrável localmente: gateway emulado → authorizer → 401 sem token / 200 com o JWT da function. O desenho de produção não muda; muda o alcance da demo sem AWS. Detalhes e reavaliação do LocalStack no [Adendo do ADR-029](029-emulacao-local-lambda.md#adendo-2026-07-11--authorizer-local-via-sam-e-reavaliação-do-localstack).
 
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)
