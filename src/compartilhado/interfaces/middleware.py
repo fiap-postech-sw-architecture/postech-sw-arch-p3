@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from uuid import uuid4
 
 import structlog
@@ -28,17 +29,31 @@ def _caminho_de_docs(path: str) -> bool:
     return any(path == p or path.startswith(p + "/") for p in _DOCS_PATHS)
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Anexa headers de seguranca em toda resposta e propaga um request_id unico.
+# Correlacao fim-a-fim (RNF-029 / ADR-032): o X-Request-ID gerado na borda
+# externa (API Gateway -> lambda -> app) e aceito quando "sano" — ate 128
+# chars de um charset seguro para logs e headers. Qualquer outra coisa
+# (vazio, longo demais, espacos, CRLF, unicode) e descartada e um uuid4 novo
+# assume: nunca ecoamos lixo nem injecao de log de volta no header.
+_REQUEST_ID_EXTERNO_VALIDO = re.compile(r"[A-Za-z0-9._-]{1,128}")
 
-    Vincula o request_id ao contexto do structlog para correlacionar logs dentro
-    do mesmo request. Os headers aplicados estao listados no metodo dispatch.
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Anexa headers de seguranca em toda resposta e propaga o request_id.
+
+    Aceita o ``X-Request-ID`` vindo de fora quando valido (correlacao
+    gateway -> lambda -> app, RNF-029); ausente ou invalido, gera um uuid4.
+    Vincula o request_id ao contexto do structlog para correlacionar logs
+    dentro do mesmo request. Os headers aplicados estao listados no metodo
+    dispatch.
     """
 
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        request_id = str(uuid4())
+        recebido = request.headers.get("X-Request-ID", "")
+        request_id = (
+            recebido if _REQUEST_ID_EXTERNO_VALIDO.fullmatch(recebido) else str(uuid4())
+        )
         request.state.request_id = request_id
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)

@@ -1,0 +1,111 @@
+# Loki single-binary — agregador de logs da demonstracao (ADR-032/RNF-029).
+# Recebe os logs JSON estruturados dos pods via Promtail (promtail.yaml) e
+# serve consultas LogQL para o Grafana (datasource `loki`). Mesmo padrao de
+# workload de demo do Mailpit/Jaeger/Prometheus: Deployment + Service
+# ClusterIP, single-binary com filesystem storage.
+#
+# Trade-off deliberado: storage em emptyDir — os logs agregados evaporam
+# com o pod. Aceitavel para o cluster de demo local/efemero (mesmo racional
+# do Prometheus sem PVC); producao usaria PVC ou object storage (S3) com o
+# Loki em modo distribuido.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: pytstop
+  labels:
+    app: loki
+data:
+  loki.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+    common:
+      instance_addr: 127.0.0.1
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: pytstop
+  labels:
+    app: loki
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+    spec:
+      # A imagem roda como usuario 10001 (nao-root); o fsGroup garante
+      # escrita no volume /loki.
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: loki
+          # Tag imutavel (ADR-019): nada de `:latest`.
+          image: grafana/loki:2.9.8
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/loki/loki.yaml
+          ports:
+            - name: http
+              containerPort: 3100
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+              readOnly: true
+            - name: storage
+              mountPath: /loki
+          # Footprint modesto: volume de logs de demo, indice em memoria.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: loki-config
+        # emptyDir: ver trade-off no cabecalho (demo sem persistencia).
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: pytstop
+  labels:
+    app: loki
+spec:
+  type: ClusterIP
+  selector:
+    app: loki
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100

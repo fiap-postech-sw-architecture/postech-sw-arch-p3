@@ -179,6 +179,21 @@ def criar_app() -> FastAPI:
     application.add_middleware(SecurityHeadersMiddleware)
     registrar_error_handlers(application)
 
+    # Metricas Prometheus da API (ADR-032): gated por API_METRICS_ENABLED
+    # (default off, no-op). Roda AQUI (nao no lifespan) porque adiciona
+    # middleware, e adicionado por ultimo o MetricasHTTPMiddleware fica o mais
+    # externo — mede a latencia completa, inclusive dos middlewares. Quando
+    # ativas, registra tambem o listener de metricas de negocio de OS
+    # (import local: contexto so e tocado com a flag ligada, como os routers).
+    from src.compartilhado.infraestrutura.metrics import configurar_metricas_api
+
+    if configurar_metricas_api(application):
+        from src.ordem_servico.infraestrutura.metrics import (
+            instrumentar_metricas_de_ordens,
+        )
+
+        instrumentar_metricas_de_ordens()
+
     return application
 
 

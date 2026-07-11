@@ -2,7 +2,7 @@
 
 > [↑ Raiz do projeto](../README.md)
 
-Manifests da aplicação PytStop para o cluster kind da fase 2 (RNF-020): Deployment, Service, ConfigMap, Secret e HPA, mais o Mailpit de demonstração ([ADR-018](../docs/arquitetura/adr/fase2/018-notificacao-email.md)), o Jaeger de traces ([ADR-020](../docs/arquitetura/adr/fase2/020-observabilidade-opentelemetry.md)) e o Prometheus que coleta as métricas do relay ([ADR-024](../docs/arquitetura/adr/fase2/024-metricas-prometheus.md)). O desenho integrado está na [RFC-002](../docs/arquitetura/rfc/fase2/rfc-002-infraestrutura-e-deploy-fase-2.md) (§2, §5 e §6).
+Manifests da aplicação PytStop para o cluster kind da fase 2 (RNF-020): Deployment, Service, ConfigMap, Secret e HPA, mais o Mailpit de demonstração ([ADR-018](../docs/arquitetura/adr/fase2/018-notificacao-email.md)), o Jaeger de traces ([ADR-020](../docs/arquitetura/adr/fase2/020-observabilidade-opentelemetry.md)) e o Prometheus que coleta as métricas do relay ([ADR-024](../docs/arquitetura/adr/fase2/024-metricas-prometheus.md)). A fase 3 acrescenta a stack de monitoramento completa ([ADR-032](../docs/arquitetura/adr/fase3/032-monitoramento-grafana-loki.md)): Grafana (dashboards + alertas provisionados), Loki + Promtail (logs) e kube-state-metrics + scrape do cAdvisor (CPU/memória dos pods). O desenho integrado está na [RFC-002](../docs/arquitetura/rfc/fase2/rfc-002-infraestrutura-e-deploy-fase-2.md) (§2, §5 e §6).
 
 | Arquivo | Recurso |
 |---|---|
@@ -14,7 +14,11 @@ Manifests da aplicação PytStop para o cluster kind da fase 2 (RNF-020): Deploy
 | `hpa.yaml` | HPA por CPU e memória, 1–5 réplicas |
 | `mailpit.yaml` | Mailpit — SMTP de demo + UI web |
 | `jaeger.yaml` | Jaeger all-in-one — traces OTLP da demo (ADR-020) |
-| `prometheus.yaml` | Prometheus — Deployment + Service (9090) que faz *scrape* das métricas do relay (ADR-024) |
+| `prometheus.yaml` | Prometheus — Deployment + Service (9090) + RBAC; *scrape* do relay (ADR-024), da API, do kube-state-metrics e do cAdvisor/kubelet (ADR-032) |
+| `grafana.yaml` | Grafana — dashboards, datasources (Prometheus/Loki/Jaeger) e alertas provisionados por ConfigMap (ADR-032) |
+| `kube-state-metrics.yaml` | kube-state-metrics — métricas do estado dos objetos k8s + RBAC (ADR-032) |
+| `loki.yaml` | Loki single-binary — agregador de logs, porta 3100 (ADR-032) |
+| `promtail.yaml` | Promtail — DaemonSet que coleta os logs dos pods do namespace e envia ao Loki (ADR-032) |
 | `relay.yaml` | Relay de eventos + Service `pytstop-relay-metrics` (9100) expondo o `/metrics` do relay (ADR-022/ADR-024) |
 | `jobs/migration-job.yaml` | `pytstop-migrate` — Job de migração do schema (TD-015), **aplicado à parte** (ver abaixo) |
 
@@ -70,12 +74,12 @@ sed "s|ghcr.io/fiap-postech-sw-architecture/postech-sw-arch-p2-app:dev|<imagem:t
 kubectl -n pytstop wait --for=condition=complete --timeout=180s job/pytstop-migrate
 ```
 
-O fluxo integrado (`make cd-local` / CD na main) já executa esses passos na ordem certa — esta seção documenta o caminho manual. A ordem que o pipeline aplica é: **(a)** namespace + ConfigMap/Secret + serviços de apoio (Mailpit, Jaeger, Prometheus, Redis, Service, HPA); **(b)** o Job de migração + espera com falha rápida; **(c)** só então `deployment.yaml` e `relay.yaml` (as cargas da aplicação) + `rollout status`. Assim nenhuma réplica da API/relay sobe antes do schema estar em head (ADR-019). O Job roda `alembic upgrade head` (migração obrigatória — falha reprova o Job e aborta o deploy) seguido do seed do admin best-effort.
+O fluxo integrado (`make cd-local` / CD na main) já executa esses passos na ordem certa — esta seção documenta o caminho manual. A ordem que o pipeline aplica é: **(a)** namespace + ConfigMap/Secret + serviços de apoio (Mailpit, Jaeger, Prometheus, Grafana, Loki, Promtail, kube-state-metrics, Redis, Service, HPA); **(b)** o Job de migração + espera com falha rápida; **(c)** só então `deployment.yaml` e `relay.yaml` (as cargas da aplicação) + `rollout status`. Assim nenhuma réplica da API/relay sobe antes do schema estar em head (ADR-019). O Job roda `alembic upgrade head` (migração obrigatória — falha reprova o Job e aborta o deploy) seguido do seed do admin best-effort.
 
 ## Conferir
 
 ```bash
-kubectl get pods -n pytstop                  # pytstop-api, mailpit, jaeger e prometheus 1/1 Running
+kubectl get pods -n pytstop                  # pytstop-api, mailpit, jaeger, prometheus, grafana, loki, promtail e kube-state-metrics 1/1 Running
 kubectl get hpa -n pytstop                   # percentuais de cpu/memoria (exige metrics-server)
 kubectl logs -n pytstop deploy/pytstop-api   # so uvicorn no boot (migracao roda no Job)
 kubectl logs -n pytstop job/pytstop-migrate  # alembic upgrade head + seed do admin
@@ -91,6 +95,8 @@ kubectl port-forward -n pytstop svc/pytstop-api 8000:8000   # API: http://localh
 kubectl port-forward -n pytstop svc/mailpit 8025:8025       # Mailpit UI: http://localhost:8025
 kubectl port-forward -n pytstop svc/jaeger 16686:16686      # Jaeger UI: http://localhost:16686
 kubectl port-forward -n pytstop svc/prometheus 9090:9090    # Prometheus UI: http://localhost:9090
+kubectl port-forward -n pytstop svc/grafana 3000:3000       # Grafana: http://localhost:3000
+kubectl port-forward -n pytstop svc/loki 3100:3100          # Loki (API LogQL; consulte pelo Grafana)
 ```
 
 A UI de simulação (`pytstop-ui`, issue #186) roda no cluster e consome a API
@@ -106,7 +112,18 @@ O ConfigMap liga a instrumentação no cluster de demo (`OTEL_ENABLED=true`): a 
 
 O relay liga as métricas via env **inline** no `k8s/relay.yaml` (`RELAY_METRICS_ENABLED=true`/`RELAY_METRICS_PORT=9100`), e não pelo ConfigMap (diferente do `OTEL_ENABLED` da API, que vem do ConfigMap): o relay expõe `/metrics` no formato Prometheus (porta 9100, Service `pytstop-relay-metrics`) e o **Prometheus faz *scrape*** desse alvo. Com o port-forward do Prometheus acima ativo, abra **http://localhost:9090** e consulte os sinais da outbox: `outbox_pendentes`, `outbox_idade_mais_antigo_seconds`, `outbox_dead` (gauges) e `outbox_entregue_total`/`outbox_falha_total`/`outbox_dead_total`/`outbox_retry_total` (counters). Ausente `RELAY_METRICS_ENABLED`, o relay não sobe o `/metrics` e o alvo fica vazio.
 
+Na fase 3 (ADR-032) o mesmo Prometheus raspa também o `/metrics` da **API** (`pytstop-api:8000` — latência `http_request_duration_seconds` e métricas de negócio `pytstop_os_*`), o **kube-state-metrics** (`kube-state-metrics:8080`) e o **cAdvisor** via kubelet (`role: node`, HTTPS com bearer token da ServiceAccount e `insecure_skip_verify` — o certificado do kubelet no kind é autoassinado, mesmo racional do `--kubelet-insecure-tls` do metrics-server).
+
 > **Escalar o relay (`replicas>1`)**: os counters (`outbox_*_total`) são in-memory por-processo e o `pytstop-relay-metrics` é um Service ClusterIP (load-balanced), então a `replicas>1` cada *scrape* cai num pod aleatório e `rate()`/`increase()` veriam resets espúrios — operar o relay escalado com counters corretos exige *scrape* por-pod (Service *headless* + *service-discovery*). Os gauges (lidos do banco) não têm esse problema. No demo (`replicas:1`) não se manifesta — detalhe na [ADR-024](../docs/arquitetura/adr/fase2/024-metricas-prometheus.md) (Negativas).
+
+## Dashboards, logs e alertas no Grafana (ADR-032)
+
+Com o port-forward do Grafana ativo, abra **http://localhost:3000** — o acesso anônimo entra como *Viewer* direto nos dashboards (a senha default do Grafana **não** fica ativa; o admin usa a senha de demonstração do Secret [`grafana.yaml`](grafana.yaml)). Tudo é provisionado por ConfigMap versionado no git — datasources, dashboards e alertas sobem prontos, zero clique manual:
+
+- **Dashboards** (pasta *PytStop*): **PytStop — Negócio** (volume diário de OS, tempo médio por status, erros de integração da outbox, visão NOC) e **PytStop — Plataforma** (latência p50/p90/p99 por rota, taxa de 5xx, CPU/memória por pod via cAdvisor, uptime/health).
+- **Logs (Loki)**: em *Explore*, datasource **Loki**, consulte por labels de baixa cardinalidade, ex.: `{app="pytstop-api"}`. A correlação por `request_id` se faz por **filtro de linha** — `{app="pytstop-api"} |= "<request_id>"` ou `| json | request_id="<id>"` — nunca por label (cardinalidade explodiria o índice; comentário no [`promtail.yaml`](promtail.yaml)). O Loki usa `emptyDir` (logs agregados evaporam com o pod — trade-off de demo comentado no [`loki.yaml`](loki.yaml)).
+- **Alertas** (*Alerting → Alert rules*, pasta *PytStop*): CPU de pod > 80% do limite por 10min; latência p95 > 300ms por 5min; taxa de 5xx > 1%; `outbox_dead > 0`; API fora do ar (`up == 0`). Notificação usa a policy default do Grafana — suficiente para a demo, sem canal externo (ADR-032, Negativas).
+- **Traces (Jaeger)**: o datasource **Jaeger** também está provisionado — os traces do ADR-020 ficam consultáveis no mesmo Grafana.
 
 ## Validar o HPA
 
@@ -135,7 +152,13 @@ kubectl delete pod -n pytstop gerador-carga
 kubectl delete namespace pytstop
 ```
 
-Remove aplicação, Mailpit, Jaeger, Prometheus e configuração de uma vez. A infraestrutura de `/infra` (cluster e banco) é gerenciada pelo Terraform (`terraform destroy`).
+Remove aplicação, Mailpit, Jaeger, Prometheus, Grafana, Loki, Promtail, kube-state-metrics e configuração de uma vez. Os recursos **cluster-scoped** da stack de monitoramento (ClusterRoles/ClusterRoleBindings `prometheus`, `kube-state-metrics` e `promtail`) não pertencem ao namespace — remova-os à parte se quiser o cluster limpo:
+
+```bash
+kubectl delete clusterrole,clusterrolebinding prometheus kube-state-metrics promtail
+```
+
+A infraestrutura de `/infra` (cluster e banco) é gerenciada pelo Terraform (`terraform destroy`).
 
 ---
 
