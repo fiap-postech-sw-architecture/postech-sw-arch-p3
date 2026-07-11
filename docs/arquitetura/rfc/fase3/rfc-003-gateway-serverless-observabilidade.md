@@ -193,10 +193,10 @@ Paridade cloud × local, componente a componente:
 | Componente | Cloud (AWS) | Local | Paridade |
 |---|---|---|---|
 | API Gateway — rota de autenticação | HTTP API → Lambda | `sam local start-api` (gateway emulado + function) | **Sim** — mesma rota, mesmo formato de evento |
-| API Gateway — roteamento às rotas do app | HTTP API → authorizer → app no EKS | **Não existe**: as rotas do app ficam expostas direto no kind, sem gateway na frente | **Sem paridade** — aceita e documentada ([ADR-027](../../adr/fase3/027-api-gateway-aws.md)); a validação JWT redundante no app garante a mesma semântica de segurança |
-| Lambda authorizer | valida JWT na borda | **Não existe** localmente | **Sem paridade** — coberto pela validação redundante do app |
+| API Gateway — roteamento às rotas do app | HTTP API → authorizer → app no EKS | Rota de autenticação e rota protegida emuladas no `sam local start-api`; o proxy até o app no kind segue inexistente (as rotas do app ficam expostas direto) | **Paridade parcial** — a peça de segurança (authorizer) é emulada; o roteamento proxy é aceito sem paridade ([ADR-027](../../adr/fase3/027-api-gateway-aws.md) + Adendo), com validação JWT redundante no app |
+| Lambda authorizer | valida JWT na borda | `sam local start-api` com o authorizer declarado no `template.yaml` (rota protegida de exemplo) | **Paridade funcional** desde 2026-07-11 (Adendo do [ADR-029](../../adr/fase3/029-emulacao-local-lambda.md)); verificado ao vivo: 401 sem token, 403 token adulterado, request com token válido alcança o handler |
 | Lambda de autenticação | função `python3.13` na AWS | pytest (handler direto + testcontainers) + SAM (runtime real em container) | **Sim** — mesmo handler, mesmo Postgres |
-| Cluster Kubernetes | EKS (overlay kustomize EKS) | kind (overlay local) | **Sim** — mesmos manifests base, HPA e probes; muda o overlay |
+| Cluster Kubernetes | EKS (overlay kustomize EKS) | kind (manifests `k8s/*.yaml` aplicados direto — não há overlay local) | **Sim** — mesmos manifests base, HPA e probes; muda o overlay |
 | Banco | RDS PostgreSQL 16 | PostgreSQL 16 em Docker/kind | **Sim** — mesmo engine, mesma versão, mesmas migrações |
 | Monitoramento | Prometheus/Grafana/Loki/Jaeger no EKS | a mesma stack no kind | **Sim** — manifests idênticos ([ADR-032](../../adr/fase3/032-monitoramento-grafana-loki.md)) |
 | Relay + outbox + Mailpit + Redis | no EKS | no kind/compose | **Sim** — herança da fase 2 |

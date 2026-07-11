@@ -76,3 +76,4 @@ sbom-requirements.txt
 # `make dast`/CI a cada run — o CI os publica como artefato `zap-dast-report`.
 # As regras (.zap/rules.tsv) sao versionadas; so os relatorios sao ignorados.
 .zap/zap-report.*
+.zap/zap.yaml

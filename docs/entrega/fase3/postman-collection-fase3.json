@@ -1,6 +1,521 @@
 {
  "item": [
   {
+   "name": "00 - Smoke fase 3 (newman)",
+   "description": "Fluxo encadeado executavel via newman (task B2 do plano de fechamento local). Requer --env-var admin_password=... (nunca chumbada) e opcionalmente --env-var gateway_url para o bonus da Lambda. CPF e placa sao gerados aleatoriamente no pre-request para o run ser re-executavel sem 409.",
+   "item": [
+    {
+     "name": "01 Login admin",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/autenticacao/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "autenticacao",
+        "login"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"email\": \"admin@pytstop.dev\", \"senha\": \"{{admin_password}}\"}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('login 200', () => pm.response.to.have.status(200));",
+         "const j = pm.response.json();",
+         "pm.test('access_token presente', () => pm.expect(j.access_token).to.be.a('string').and.not.empty);",
+         "pm.test('refresh_token presente', () => pm.expect(j.refresh_token).to.be.a('string').and.not.empty);",
+         "pm.environment.set('token', j.access_token);",
+         "pm.environment.set('refresh_token', j.refresh_token);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "02 Refresh (rotaciona par de tokens)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/autenticacao/refresh",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "autenticacao",
+        "refresh"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"refresh_token\": \"{{refresh_token}}\"}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('refresh 200', () => pm.response.to.have.status(200));",
+         "const j = pm.response.json();",
+         "pm.test('novo access_token presente', () => pm.expect(j.access_token).to.be.a('string').and.not.empty);",
+         "pm.environment.set('token', j.access_token);",
+         "pm.environment.set('refresh_token', j.refresh_token);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "03 Criar cliente (CPF gerado no pre-request)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/clientes/",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "clientes"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"nome\": \"Smoke Newman Cliente\", \"documento\": \"{{smoke_cpf}}\", \"tipo_documento\": \"cpf\", \"contato\": \"smoke-newman@teste.dev\"}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "// Gera CPF valido aleatorio: run re-executavel sem 409 de documento duplicado.",
+         "function dv(d) { let s = 0; for (let i = 0; i < d.length; i++) s += d[i] * (d.length + 1 - i); const r = s % 11; return r < 2 ? 0 : 11 - r; }",
+         "const base = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10));",
+         "const d1 = dv(base); const d2 = dv(base.concat([d1]));",
+         "pm.environment.set('smoke_cpf', base.concat([d1, d2]).join(''));"
+        ]
+       }
+      },
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('cliente criado 201', () => pm.response.to.have.status(201));",
+         "const j = pm.response.json();",
+         "pm.test('cliente tem id', () => pm.expect(j.id).to.be.a('string').and.not.empty);",
+         "pm.environment.set('cliente_id', j.id);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "04 Criar veiculo do cliente (placa gerada no pre-request)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/clientes/{{cliente_id}}/veiculos",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "clientes",
+        "{{cliente_id}}",
+        "veiculos"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"placa\": \"{{smoke_placa}}\", \"marca\": \"Fiat\", \"modelo\": \"Uno Smoke Newman\", \"ano\": 2020}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "// Placa Mercosul aleatoria (LLLDLDD): re-executavel sem 409 de placa duplicada.",
+         "const L = () => String.fromCharCode(65 + Math.floor(Math.random() * 26));",
+         "const D = () => Math.floor(Math.random() * 10);",
+         "pm.environment.set('smoke_placa', `${L()}${L()}${L()}${D()}${L()}${D()}${D()}`);"
+        ]
+       }
+      },
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('veiculo criado 201', () => pm.response.to.have.status(201));",
+         "const j = pm.response.json();",
+         "pm.test('veiculo tem id', () => pm.expect(j.id).to.be.a('string').and.not.empty);",
+         "pm.environment.set('veiculo_id', j.id);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "05 Listar catalogo de servicos",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/servicos/",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "servicos"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('servicos 200', () => pm.response.to.have.status(200));",
+         "const j = pm.response.json();",
+         "pm.test('catalogo nao vazio', () => pm.expect(j.items).to.be.an('array').and.not.empty);",
+         "const ativo = j.items.find(s => s.ativo);",
+         "pm.test('ha servico ativo', () => pm.expect(ativo).to.exist);",
+         "pm.environment.set('servico_id', ativo.id);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "06 Listar estoque",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/estoque/",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "estoque"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('estoque 200', () => pm.response.to.have.status(200));",
+         "const j = pm.response.json();",
+         "pm.test('estoque nao vazio', () => pm.expect(j.items).to.be.an('array').and.not.empty);",
+         "const disponivel = j.items.find(i => i.ativo && i.quantidade > 0);",
+         "pm.test('ha item ativo com saldo', () => pm.expect(disponivel).to.exist);",
+         "pm.environment.set('item_estoque_id', disponivel.id);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "07 Criar ordem de servico (com servico + peca)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/ordens-de-servico/",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "ordens-de-servico"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"cliente_id\": \"{{cliente_id}}\", \"veiculo_id\": \"{{veiculo_id}}\", \"servicos\": [{\"servico_catalogo_id\": \"{{servico_id}}\", \"quantidade\": 1}], \"pecas\": [{\"servico_catalogo_id\": \"{{servico_id}}\", \"item_estoque_id\": \"{{item_estoque_id}}\", \"quantidade\": 1}]}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('OS criada 201', () => pm.response.to.have.status(201));",
+         "const j = pm.response.json();",
+         "pm.test('OS tem id', () => pm.expect(j.id).to.be.a('string').and.not.empty);",
+         "pm.test('status recebida', () => pm.expect(j.status).to.eql('recebida'));",
+         "pm.test('OS tem itens', () => pm.expect(j.itens).to.be.an('array').with.length(2));",
+         "pm.environment.set('ordem_id', j.id);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "08 Iniciar diagnostico (RECEBIDA -> EM_DIAGNOSTICO)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/ordens-de-servico/{{ordem_id}}/diagnostico",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "ordens-de-servico",
+        "{{ordem_id}}",
+        "diagnostico"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('diagnostico 200', () => pm.response.to.have.status(200));",
+         "pm.test('status em_diagnostico', () => pm.expect(pm.response.json().status).to.eql('em_diagnostico'));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "09 Gerar orcamento (EM_DIAGNOSTICO -> AGUARDANDO_APROVACAO)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/ordens-de-servico/{{ordem_id}}/orcamento",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "ordens-de-servico",
+        "{{ordem_id}}",
+        "orcamento"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('orcamento 200', () => pm.response.to.have.status(200));",
+         "const j = pm.response.json();",
+         "pm.test('status aguardando_aprovacao', () => pm.expect(j.status).to.eql('aguardando_aprovacao'));",
+         "pm.test('orcamento calculado', () => pm.expect(j.orcamento).to.not.be.null);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "10 Aprovar orcamento (AGUARDANDO_APROVACAO -> EM_EXECUCAO)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/ordens-de-servico/{{ordem_id}}/aprovacao",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "ordens-de-servico",
+        "{{ordem_id}}",
+        "aprovacao"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('aprovacao 200', () => pm.response.to.have.status(200));",
+         "pm.test('status em_execucao', () => pm.expect(pm.response.json().status).to.eql('em_execucao'));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "11 Lambda /auth (SAM local, bonus)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{gateway_url}}/auth",
+       "host": [
+        "{{gateway_url}}"
+       ],
+       "path": [
+        "auth"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"cpf\": \"11144477735\"}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('lambda auth 200', () => pm.response.to.have.status(200));",
+         "pm.test('lambda emite access_token', () => pm.expect(pm.response.json().access_token).to.be.a('string').and.not.empty);"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
    "name": "Autenticacao serverless (API Gateway + Lambda)",
    "item": [
     {
@@ -9118,7 +9633,7 @@
  "variable": [
   {
    "key": "baseUrl",
-   "value": "/"
+   "value": "http://localhost:18000"
   },
   {
    "key": "gateway_url",
