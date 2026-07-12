@@ -1,0 +1,552 @@
+# Grafana — camada unica de visualizacao da demonstracao (ADR-032):
+# dashboards de negocio e plataforma (RF-027), logs via Loki (RNF-029) e
+# alertas provisionados (RNF-028). Tudo observabilidade-como-codigo:
+# datasources, dashboards JSON e regras de alerta versionados no git e
+# entregues por ConfigMaps de provisioning — zero clique manual, o Grafana
+# sobe pronto. Mesmo padrao de workload de demo do Mailpit/Jaeger/
+# Prometheus: Deployment + Service ClusterIP, sem persistencia (o estado
+# do Grafana e todo derivado dos ConfigMaps; emptyDir para o runtime).
+#
+# Acesso (ADR-032): anonimo como Viewer (dashboards visiveis sem login na
+# demo) + admin com senha vinda de Secret — a senha default `admin` do
+# Grafana NUNCA fica ativa.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin
+  namespace: pytstop
+  labels:
+    app: grafana
+type: Opaque
+stringData:
+  # VALOR DE DEMONSTRACAO — cluster kind local/efemero, sem dado real
+  # (mesmo padrao do secret.yaml). Producao usaria SealedSecrets/External
+  # Secrets e injecao no apply, nunca segredo real commitado (RFC-002 §6).
+  GF_SECURITY_ADMIN_PASSWORD: "pytstop-grafana-demo-2026"
+---
+# Datasources provisionados: Prometheus (metricas), Loki (logs) e Jaeger
+# (traces) — os tres pilares da observabilidade num Grafana so (ADR-032).
+# UIDs fixos: os dashboards e as regras de alerta referenciam por UID.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: pytstop
+  labels:
+    app: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+      - name: Loki
+        uid: loki
+        type: loki
+        access: proxy
+        url: http://loki:3100
+      - name: Jaeger
+        uid: jaeger
+        type: jaeger
+        access: proxy
+        url: http://jaeger:16686
+---
+# Provider de dashboards: carrega todo JSON montado em
+# /var/lib/grafana/dashboards (ConfigMap grafana-dashboards abaixo).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provider
+  namespace: pytstop
+  labels:
+    app: grafana
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: pytstop
+        folder: PytStop
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+---
+# Dashboards JSON versionados (ADR-032; pratica de exportacao/versionamento
+# do material — Monitoramento-Avancado, Aulas 06 e 11). Dois paineis:
+#   - Negocio (RF-027): volume diario de OS, tempo medio por status,
+#     erros de integracao (outbox) e visao NOC de status;
+#   - Plataforma (RNF-028): latencia p50/p90/p99 por rota, taxa de 5xx,
+#     CPU/memoria por pod (cAdvisor) e uptime/health.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: pytstop
+  labels:
+    app: grafana
+data:
+  pytstop-negocio.json: |
+    {
+      "uid": "pytstop-negocio",
+      "title": "PytStop — Negócio",
+      "tags": ["pytstop"],
+      "timezone": "browser",
+      "refresh": "30s",
+      "time": {"from": "now-24h", "to": "now"},
+      "schemaVersion": 39,
+      "panels": [
+        {
+          "id": 1,
+          "title": "OS criadas (últimas 24h)",
+          "type": "stat",
+          "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"decimals": 0, "unit": "short"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "sum(increase(pytstop_os_criadas_total[24h]))", "legendFormat": "OS criadas"}
+          ]
+        },
+        {
+          "id": 2,
+          "title": "NOC — status dos serviços",
+          "type": "stat",
+          "gridPos": {"h": 6, "w": 18, "x": 6, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "FORA", "color": "red"}, "1": {"text": "OK", "color": "green"}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+            },
+            "overrides": []
+          },
+          "options": {"colorMode": "background"},
+          "targets": [
+            {"refId": "A", "expr": "min by (job) (up{job=~\"pytstop-.*|kube-state-metrics\"})", "legendFormat": "{{job}}", "instant": true}
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Volume de OS criadas (por hora)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "sum(increase(pytstop_os_criadas_total[1h]))", "legendFormat": "OS criadas/h"}
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Tempo médio de OS por status",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (status) (rate(pytstop_os_duracao_status_segundos_sum[1h])) / sum by (status) (rate(pytstop_os_duracao_status_segundos_count[1h]))",
+              "legendFormat": "{{status}}"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Erros de integração (outbox, por hora)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "sum(increase(outbox_falha_total[1h]))", "legendFormat": "falhas/h"},
+            {"refId": "B", "expr": "sum(increase(outbox_dead_total[1h]))", "legendFormat": "dead/h"}
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Eventos na fila da outbox (dead = alerta)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "outbox_pendentes", "legendFormat": "pendentes"},
+            {"refId": "B", "expr": "outbox_dead", "legendFormat": "dead"}
+          ]
+        }
+      ]
+    }
+  pytstop-plataforma.json: |
+    {
+      "uid": "pytstop-plataforma",
+      "title": "PytStop — Plataforma",
+      "tags": ["pytstop"],
+      "timezone": "browser",
+      "refresh": "30s",
+      "time": {"from": "now-6h", "to": "now"},
+      "schemaVersion": 39,
+      "panels": [
+        {
+          "id": 1,
+          "title": "Health da API (up)",
+          "type": "stat",
+          "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "FORA", "color": "red"}, "1": {"text": "OK", "color": "green"}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+            },
+            "overrides": []
+          },
+          "options": {"colorMode": "background"},
+          "targets": [
+            {"refId": "A", "expr": "min(up{job=\"pytstop-api\"})", "legendFormat": "pytstop-api", "instant": true}
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Uptime da API (24h)",
+          "type": "stat",
+          "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "percentunit", "decimals": 2}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "avg(avg_over_time(up{job=\"pytstop-api\"}[24h]))", "legendFormat": "uptime 24h"}
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Taxa de erro (5xx)",
+          "type": "timeseries",
+          "gridPos": {"h": 6, "w": 12, "x": 12, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(http_request_duration_seconds_count{status=~\"5..\"}[5m])) / sum(rate(http_request_duration_seconds_count[5m]))",
+              "legendFormat": "5xx / total"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Latência por rota — p50 / p90 / p99",
+          "type": "timeseries",
+          "gridPos": {"h": 9, "w": 24, "x": 0, "y": 6},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "histogram_quantile(0.50, sum by (le, rota) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p50 {{rota}}"},
+            {"refId": "B", "expr": "histogram_quantile(0.90, sum by (le, rota) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p90 {{rota}}"},
+            {"refId": "C", "expr": "histogram_quantile(0.99, sum by (le, rota) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p99 {{rota}}"}
+          ]
+        },
+        {
+          "id": 5,
+          "title": "CPU por pod (cores)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"pytstop\", container!=\"\"}[5m]))",
+              "legendFormat": "{{pod}}"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Memória por pod (working set)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"pytstop\", container!=\"\"})",
+              "legendFormat": "{{pod}}"
+            }
+          ]
+        }
+      ]
+    }
+---
+# Regras de alerta provisionadas por arquivo (Grafana alerting, ADR-032/
+# RNF-028) — thresholds do material (Monitoramento-Avancado, Aula 05)
+# adaptados ao PytStop. Cada regra: query Prometheus (A) + expressao de
+# threshold (C). Notificacao usa a policy default do Grafana (sem canal
+# externo — suficiente para a demo; ADR-032, Negativas).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-alerting
+  namespace: pytstop
+  labels:
+    app: grafana
+data:
+  rules.yaml: |
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: pytstop-alertas
+        folder: PytStop
+        interval: 1m
+        rules:
+          # CPU de pod > 80% do LIMITE por 10min (uso real do cAdvisor
+          # dividido pelo limite via kube-state-metrics).
+          - uid: pytstop-cpu-pod-alta
+            title: "CPU de pod acima de 80% do limite (10min)"
+            condition: C
+            for: 10m
+            noDataState: OK
+            execErrState: Error
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod do namespace pytstop com CPU acima de 80% do limite por 10 minutos."
+            data:
+              - refId: A
+                relativeTimeRange: {from: 600, to: 0}
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  instant: true
+                  expr: sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="pytstop", container!=""}[5m])) / sum by (pod) (kube_pod_container_resource_limits{namespace="pytstop", resource="cpu"})
+              - refId: C
+                relativeTimeRange: {from: 0, to: 0}
+                datasourceUid: __expr__
+                model:
+                  refId: C
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator: {type: gt, params: [0.8]}
+          # Latencia p95 > 300ms por 5min (SLO do material, Aula 05).
+          - uid: pytstop-latencia-p95
+            title: "Latência p95 da API acima de 300ms (5min)"
+            condition: C
+            for: 5m
+            noDataState: OK
+            execErrState: Error
+            labels:
+              severity: warning
+            annotations:
+              summary: "p95 de http_request_duration_seconds acima de 300ms por 5 minutos."
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  instant: true
+                  expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+              - refId: C
+                relativeTimeRange: {from: 0, to: 0}
+                datasourceUid: __expr__
+                model:
+                  refId: C
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator: {type: gt, params: [0.3]}
+          # Taxa de erro 5xx > 1% das requisicoes.
+          - uid: pytstop-taxa-5xx
+            title: "Taxa de erro 5xx acima de 1% (5min)"
+            condition: C
+            for: 5m
+            noDataState: OK
+            execErrState: Error
+            labels:
+              severity: critical
+            annotations:
+              summary: "Mais de 1% das requisições da API respondendo 5xx."
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  instant: true
+                  expr: sum(rate(http_request_duration_seconds_count{status=~"5.."}[5m])) / sum(rate(http_request_duration_seconds_count[5m]))
+              - refId: C
+                relativeTimeRange: {from: 0, to: 0}
+                datasourceUid: __expr__
+                model:
+                  refId: C
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator: {type: gt, params: [0.01]}
+          # Falha no processamento de OS: evento morto na outbox (ADR-024).
+          - uid: pytstop-outbox-dead
+            title: "Outbox com evento dead (falha no processamento de OS)"
+            condition: C
+            for: 1m
+            noDataState: OK
+            execErrState: Error
+            labels:
+              severity: critical
+            annotations:
+              summary: "outbox_dead > 0 — evento esgotou os retries do relay e exige intervenção."
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  instant: true
+                  expr: max(outbox_dead)
+              - refId: C
+                relativeTimeRange: {from: 0, to: 0}
+                datasourceUid: __expr__
+                model:
+                  refId: C
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator: {type: gt, params: [0]}
+          # Health da API fora do ar: o scrape do job pytstop-api falhou.
+          - uid: pytstop-api-fora
+            title: "API fora do ar (up == 0)"
+            condition: C
+            for: 1m
+            noDataState: Alerting
+            execErrState: Error
+            labels:
+              severity: critical
+            annotations:
+              summary: "Prometheus não alcança o /metrics da API (job pytstop-api)."
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  instant: true
+                  expr: min(up{job="pytstop-api"})
+              - refId: C
+                relativeTimeRange: {from: 0, to: 0}
+                datasourceUid: __expr__
+                model:
+                  refId: C
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator: {type: lt, params: [1]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: pytstop
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      # A imagem roda como usuario 472 (grafana); fsGroup garante escrita
+      # no emptyDir de runtime (/var/lib/grafana).
+      securityContext:
+        fsGroup: 472
+      containers:
+        - name: grafana
+          # Tag imutavel (ADR-019): nada de `:latest`.
+          image: grafana/grafana:11.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            # Dashboards visiveis sem login (Viewer) — demo sem fricao e
+            # sem expor a senha default do admin (ADR-032).
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: "Viewer"
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: GF_SECURITY_ADMIN_PASSWORD
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: dashboards-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            - name: alerting
+              mountPath: /etc/grafana/provisioning/alerting
+              readOnly: true
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+            # Runtime (sqlite interno, plugins): efemero de proposito —
+            # todo o estado relevante vem do provisioning versionado.
+            - name: storage
+              mountPath: /var/lib/grafana
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 512Mi
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboards-provider
+          configMap:
+            name: grafana-dashboards-provider
+        - name: alerting
+          configMap:
+            name: grafana-alerting
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: pytstop
+  labels:
+    app: grafana
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000

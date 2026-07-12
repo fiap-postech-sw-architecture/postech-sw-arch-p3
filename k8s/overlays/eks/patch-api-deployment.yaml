@@ -1,0 +1,21 @@
+# EKS: pull da imagem no GHCR privado (ghcr-credentials — sem `kind load`)
+# e banco no RDS (ADR-031): o env explicito DATABASE_URL vence o envFrom do
+# pytstop-secrets de demo (precedencia env > envFrom do Kubernetes).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pytstop-api
+  namespace: pytstop
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-credentials
+      containers:
+        - name: api
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: DATABASE_URL

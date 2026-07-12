@@ -130,14 +130,19 @@ def plano_ci(n_clientes: int, n_operadores: int, n_admins: int) -> PlanoDeExecuc
         DescritorDeJourney(
             ClienteFluxosAlternativosJourney,
             min(len(TODOS_CENARIOS), 2),
-            timeout_s=60.0,
+            timeout_s=120.0,
         ),
         # Fase 2 (RF-020..023): 1 instancia no CI cobrindo os contratos novos.
-        DescritorDeJourney(Fase2ContratosJourney, 1, timeout_s=60.0),
-        DescritorDeJourney(AtendenteJourney, min(n_operadores, 1), timeout_s=30.0),
-        DescritorDeJourney(MecanicoJourney, min(n_operadores, 1), timeout_s=30.0),
-        DescritorDeJourney(AdminConcurrencyJourney, min(n_admins, 1), timeout_s=60.0),
-        DescritorDeJourney(MetricasFixtureJourney, 1, timeout_s=60.0),
+        # Timeouts das journeys com login: precisam cobrir o trabalho + UMA
+        # janela inteira do rate limit 5/min de /login (retry ate ~70s) — em
+        # maquina rapida os steps comprimem e QUALQUER journey pode ser a que
+        # espera a janela (observado local: espera de ~65s com timeout de 30s
+        # derrubava AtendenteJourney; no runner de 2 vCPUs nunca comprimia).
+        DescritorDeJourney(Fase2ContratosJourney, 1, timeout_s=120.0),
+        DescritorDeJourney(AtendenteJourney, min(n_operadores, 1), timeout_s=120.0),
+        DescritorDeJourney(MecanicoJourney, min(n_operadores, 1), timeout_s=120.0),
+        DescritorDeJourney(AdminConcurrencyJourney, min(n_admins, 1), timeout_s=120.0),
+        DescritorDeJourney(MetricasFixtureJourney, 1, timeout_s=120.0),
         # RbacMatrix: 180 celulas + 3 logins descartaveis para /logout (um por
         # papel autenticado). Em rajada, os logins extras podem colidir com o
         # rate limit 5/min em /login — o retry com backoff ate 70s e suficiente,

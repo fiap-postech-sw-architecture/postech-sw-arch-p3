@@ -1,0 +1,100 @@
+# kube-state-metrics — metricas do ESTADO dos objetos k8s (ADR-032/RNF-028):
+# limites de recursos por pod (kube_pod_container_resource_limits), raspadas
+# pelo Prometheus (job `kube-state-metrics` em prometheus.yaml). Complementa o
+# cAdvisor (uso real de CPU/memoria) — juntos dao "uso / limite" nos
+# dashboards e no alerta de CPU. Manifests puros no padrao do resto do k8s/
+# (sem helm/operator), imagem oficial com tag imutavel (ADR-019).
+#
+# `--resources=` limita a coleta ao que os dashboards/alertas consomem; o
+# ClusterRole abaixo e o espelho minimo dessa lista (nada de secrets).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-state-metrics
+  namespace: pytstop
+  labels:
+    app: kube-state-metrics
+---
+# ClusterRole (nao Role): o kube-state-metrics observa pods do cluster
+# inteiro, nao so do namespace pytstop. Somente list/watch — leitura pura.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-state-metrics
+  labels:
+    app: kube-state-metrics
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-state-metrics
+  labels:
+    app: kube-state-metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: kube-state-metrics
+    namespace: pytstop
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: pytstop
+  labels:
+    app: kube-state-metrics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app: kube-state-metrics
+    spec:
+      serviceAccountName: kube-state-metrics
+      containers:
+        - name: kube-state-metrics
+          # Tag imutavel (ADR-019): nada de `:latest`.
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0
+          imagePullPolicy: IfNotPresent
+          args:
+            # Coleta so o que dashboards/alertas usam — espelho do ClusterRole.
+            # Hoje e' so kube_pod_container_resource_limits (alerta de CPU no
+            # grafana.yaml); ampliar a lista aqui E no ClusterRole juntos.
+            - --resources=pods
+          ports:
+            - name: http-metrics
+              containerPort: 8080
+          # Footprint minimo: exporter stateless de demo.
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  namespace: pytstop
+  labels:
+    app: kube-state-metrics
+spec:
+  type: ClusterIP
+  selector:
+    app: kube-state-metrics
+  ports:
+    - name: http-metrics
+      port: 8080
+      targetPort: 8080

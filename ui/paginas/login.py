@@ -105,7 +105,9 @@ def _status_admin_seed() -> int | None:
         email=usuario_admin.email, senha=usuario_admin.senha
     )
     if status is not None:
+        # codeql[py/unused-global-variable] falso positivo: global na l.98
         _probe_seed_feito = True
+        # codeql[py/unused-global-variable] falso positivo: global na l.98
         _probe_seed_status = status
     return status
 
