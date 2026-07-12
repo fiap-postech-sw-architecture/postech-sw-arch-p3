@@ -102,7 +102,7 @@ def exigir_papel(
         raise ValueError(f"exigir_papel recebeu papel invalido: {exc}") from exc
 
     def verificar(
-        usuario: dict[str, object] = Depends(obter_usuario_atual),
+        usuario: Annotated[dict[str, object], Depends(obter_usuario_atual)],
     ) -> dict[str, object]:
         raw = usuario.get("papel")
         papel: Papel | None

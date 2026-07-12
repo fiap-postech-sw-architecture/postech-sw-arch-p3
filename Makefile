@@ -161,18 +161,22 @@ test-coverage:
 # e do socket override (o ryuk monta /var/run/docker.sock dentro do proprio
 # container) — mesmo padrao do Makefile da lambda. Ambos inocuos com Docker
 # Desktop e no CI ubuntu, que ja expoem /var/run/docker.sock.
-test-integ:
-	@if [ -z "$$DOCKER_HOST" ] && [ -S "$$HOME/.colima/default/docker.sock" ]; then \
+# Colima no macOS: docker.sock fora do path padrao; o override do socket vale
+# para qualquer alvo com testcontainers (integ e lento). Inocuo no CI/Desktop.
+DOCKER_ENV = if [ -z "$$DOCKER_HOST" ] && [ -S "$$HOME/.colima/default/docker.sock" ]; then \
 		export DOCKER_HOST="unix://$$HOME/.colima/default/docker.sock"; \
 		echo ">> colima detectado: DOCKER_HOST=$$DOCKER_HOST"; \
 	fi; \
-	TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock $(PY)pytest tests/integracao/ -x -q --tb=short
+	export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+
+test-integ:
+	@$(DOCKER_ENV); $(PY)pytest tests/integracao/ -x -q --tb=short
 
 test-all:
 	$(PY)pytest tests/ -x -q -m "not lento"
 
 test-lento:
-	$(PY_UI_TEST)pytest tests/ -q -m "lento"
+	@$(DOCKER_ENV); $(PY_UI_TEST)pytest tests/ -q -m "lento"
 
 check: lint lint-arch typecheck security test
 	@echo "All checks passed"
