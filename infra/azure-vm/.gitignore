@@ -1,9 +1,0 @@
-# Diretorio de trabalho do Terraform (providers baixados no init)
-.terraform/
-
-# Estado local — nunca versionar (pode conter valores sensiveis)
-*.tfstate
-*.tfstate.*
-
-# .terraform.lock.hcl NAO e ignorado de proposito: o lock file pina as
-# versoes exatas dos providers e deve ser commitado.

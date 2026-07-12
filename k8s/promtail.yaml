@@ -1,0 +1,168 @@
+# Promtail — coletor de logs da demonstracao (ADR-032/RNF-029). DaemonSet
+# que tail-a os arquivos de log dos pods do namespace `pytstop` direto do
+# filesystem do node (/var/log/pods) e empurra para o Loki (loki.yaml).
+#
+# Labels deliberadamente de BAIXA cardinalidade: app/pod/container/namespace
+# (vindas das labels do pod via service-discovery). Campos de alta
+# cardinalidade dos logs JSON — request_id em particular — NAO viram label
+# (cada valor unico criaria um stream novo no Loki e explodiria o indice);
+# a correlacao por request_id se faz por filtro de linha no LogQL, ex.:
+#   {app="pytstop-api"} |= "<request_id>"   ou   | json | request_id="<id>"
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: promtail
+  namespace: pytstop
+  labels:
+    app: promtail
+---
+# Leitura pura de pods para o service-discovery. ClusterRole (nao Role):
+# a API de discovery do Prometheus/Promtail lista pods no escopo do
+# cluster mesmo com o filtro de namespace na scrape_config.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: promtail
+  labels:
+    app: promtail
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: promtail
+  labels:
+    app: promtail
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: promtail
+subjects:
+  - kind: ServiceAccount
+    name: promtail
+    namespace: pytstop
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+  namespace: pytstop
+  labels:
+    app: promtail
+data:
+  promtail.yaml: |
+    server:
+      http_listen_port: 9080
+    clients:
+      - url: http://loki:3100/loki/api/v1/push
+    positions:
+      filename: /run/promtail/positions.yaml
+    scrape_configs:
+      - job_name: pytstop-pods
+        kubernetes_sd_configs:
+          - role: pod
+            # So o namespace da aplicacao — os logs de sistema (kube-system)
+            # ficam fora do escopo da demo.
+            namespaces:
+              names:
+                - pytstop
+        pipeline_stages:
+          # Descapsula o formato CRI do containerd (timestamp + stream +
+          # flags) e entrega a linha crua — o JSON estruturado do app fica
+          # intacto para consulta com `| json` no LogQL. Nenhum campo do
+          # JSON vira label aqui (ver cabecalho: cardinalidade).
+          - cri: {}
+        relabel_configs:
+          # Cada Promtail so tail-a os pods DO SEU node (os arquivos dos
+          # outros nodes nao existem no filesystem local): o Promtail
+          # descarta targets cujo __host__ difere do env HOSTNAME, que o
+          # DaemonSet injeta com o nome do node (padrao oficial do Loki).
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: __host__
+          # Labels de baixa cardinalidade a partir das labels do pod.
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+          # Caminho dos arquivos de log no node: /var/log/pods/<ns>_<pod>_<uid>/<container>/N.log
+          - source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+            separator: /
+            target_label: __path__
+            replacement: /var/log/pods/*$1/*.log
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  namespace: pytstop
+  labels:
+    app: promtail
+spec:
+  selector:
+    matchLabels:
+      app: promtail
+  template:
+    metadata:
+      labels:
+        app: promtail
+    spec:
+      serviceAccountName: promtail
+      # Roda tambem no control-plane — no kind de node unico o proprio
+      # control-plane hospeda a aplicacao.
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: promtail
+          # Tag imutavel (ADR-019): nada de `:latest`.
+          image: grafana/promtail:2.9.8
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/promtail/promtail.yaml
+          env:
+            # Nome do NODE (nao do pod): par do relabel __host__ acima.
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: http
+              containerPort: 9080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/promtail
+              readOnly: true
+            # Logs dos pods no filesystem do node (leitura pura).
+            - name: pods-logs
+              mountPath: /var/log/pods
+              readOnly: true
+            # Posicoes de leitura persistidas no node: restart do Promtail
+            # nao re-ingere os logs do zero (evita duplicatas no Loki).
+            - name: positions
+              mountPath: /run/promtail
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: promtail-config
+        - name: pods-logs
+          hostPath:
+            path: /var/log/pods
+        - name: positions
+          hostPath:
+            path: /run/promtail
+            type: DirectoryOrCreate

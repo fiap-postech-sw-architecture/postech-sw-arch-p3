@@ -1,10 +1,12 @@
-# Prometheus — backend de metricas da demonstracao (TD-022/ADR-024). Scrapeia
-# o /metrics do relay (`pytstop-relay-metrics:9100`, exposto por relay/metrics.py
-# via MeterProvider + PrometheusMetricReader) e disponibiliza a UI/PromQL por
-# port-forward na gravacao do video. Mesmo padrao de workload de demo do Mailpit
-# (ADR-018) e do Jaeger (ADR-020): ConfigMap + Deployment + Service ClusterIP,
-# storage em memoria (`--storage.tsdb` default efemero), ZERO persistencia —
-# cluster local/efemero, sem PVC.
+# Prometheus — backend de metricas da demonstracao (TD-022/ADR-024/ADR-032).
+# Fase 2 raspava so o /metrics do relay; a fase 3 (ADR-032) amplia para a
+# stack completa de monitoramento: API instrumentada (latencia + metricas de
+# negocio, RF-027), kube-state-metrics (estado dos objetos) e cAdvisor via
+# kubelet (uso de CPU/memoria dos pods, RNF-028). O Grafana (grafana.yaml)
+# consome este Prometheus como datasource. Mesmo padrao de workload de demo
+# do Mailpit (ADR-018) e do Jaeger (ADR-020): ConfigMap + Deployment +
+# Service ClusterIP, storage em memoria (`--storage.tsdb` default efemero),
+# ZERO persistencia — cluster local/efemero, sem PVC.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -17,14 +19,104 @@ data:
     global:
       scrape_interval: 15s
     scrape_configs:
-      # Alvo unico da demo: o /metrics do relay via Service ClusterIP. Targets
-      # estaticos (sem service-discovery do k8s) bastam para um alvo fixo e
-      # mantem o RBAC minimo — o pod nao precisa ler a API do cluster. O
-      # scrape_interval e herdado do bloco global (15s acima).
+      # Relay: /metrics via Service ClusterIP (ADR-024). Target estatico —
+      # alvo fixo, sem service-discovery.
       - job_name: pytstop-relay
         static_configs:
           - targets:
               - pytstop-relay-metrics:9100
+      # API: /metrics exposto pela propria API (ADR-032/RF-027) — latencia
+      # http_request_duration_seconds{method,rota,status} e metricas de
+      # negocio (pytstop_os_criadas_total, pytstop_os_duracao_status_segundos).
+      # O `up` deste job alimenta o alerta de health no Grafana.
+      # Scrape POR POD (role: pod), nao pelo Service: os counters OTel sao
+      # por processo — sob HPA o scrape via Service balanceia entre replicas
+      # e subconta. Exige `pods: get/list/watch` no ClusterRole abaixo; as
+      # queries dos dashboards agregam com sum()/sum by ().
+      - job_name: pytstop-api
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - pytstop
+        relabel_configs:
+          # So os pods da API (label `app: pytstop-api` do deployment.yaml)...
+          - action: keep
+            source_labels: [__meta_kubernetes_pod_label_app]
+            regex: pytstop-api
+          # ...e so o alvo da porta 8000 (a porta `http` declarada no pod).
+          - action: keep
+            source_labels: [__meta_kubernetes_pod_container_port_number]
+            regex: "8000"
+      # kube-state-metrics: estado dos objetos k8s (limites de recursos por
+      # pod, status de deployments/HPA) — ver kube-state-metrics.yaml.
+      - job_name: kube-state-metrics
+        static_configs:
+          - targets:
+              - kube-state-metrics:8080
+      # cAdvisor via kubelet (role node): uso REAL de CPU/memoria por
+      # container (RNF-028). Exige o ServiceAccount/ClusterRole abaixo
+      # (nodes + nodes/metrics). HTTPS com bearer token da ServiceAccount;
+      # `insecure_skip_verify` porque o certificado do kubelet no kind e
+      # autoassinado e nao cobre o IP do node — aceitavel no cluster de
+      # demo local/efemero (mesmo racional do --kubelet-insecure-tls que o
+      # metrics-server recebe no make k8s-up).
+      - job_name: kubelet-cadvisor
+        scheme: https
+        metrics_path: /metrics/cadvisor
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        tls_config:
+          insecure_skip_verify: true
+        kubernetes_sd_configs:
+          - role: node
+---
+# ServiceAccount + RBAC minimo para o service-discovery `role: node` e o
+# scrape do kubelet (fase 2 nao precisava: so targets estaticos). Leitura
+# pura: listar nodes (discovery) e GET no endpoint de metricas do kubelet.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: pytstop
+  labels:
+    app: prometheus
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+rules:
+  # Discovery dos nodes (kubernetes_sd_configs role: node).
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  # Discovery dos pods da API (kubernetes_sd_configs role: pod, job
+  # pytstop-api — scrape por pod para nao subcontar sob HPA).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Autorizacao do kubelet: GET em /metrics/* mapeia para o subresource
+  # nodes/metrics; nodes/proxy cobre variacoes de configuracao do kubelet.
+  - apiGroups: [""]
+    resources: ["nodes/metrics", "nodes/proxy"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: pytstop
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -43,6 +135,9 @@ spec:
       labels:
         app: prometheus
     spec:
+      # ServiceAccount com o ClusterRole acima — necessario para o
+      # discovery de nodes e o scrape do cAdvisor/kubelet (ADR-032).
+      serviceAccountName: prometheus
       containers:
         - name: prometheus
           # Tag imutavel (ADR-019): nada de `:latest`, build reproduzivel.
@@ -57,13 +152,13 @@ spec:
             - name: config
               mountPath: /etc/prometheus
               readOnly: true
-          # Footprint modesto: carga de demo, um unico alvo de scrape, TSDB em
-          # memoria. Memoria acima do Mailpit porque o Prometheus mantem a
-          # serie temporal e os indices em memoria.
+          # Footprint modesto: carga de demo. Memoria acima do Mailpit
+          # porque o Prometheus mantem series e indices em memoria — e a
+          # fase 3 multiplica os alvos de scrape (API, KSM, cAdvisor).
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 192Mi
             limits:
               cpu: 250m
               memory: 512Mi

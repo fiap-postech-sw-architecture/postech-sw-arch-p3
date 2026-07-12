@@ -48,6 +48,36 @@ class TestMain:
         ]
         assert "SecurityHeadersMiddleware" in middleware_classes
 
+    def test_metricas_desligadas_nao_instrumentam_nada(self) -> None:
+        # Default (API_METRICS_ENABLED ausente): sem middleware de metricas e
+        # sem listener de OS registrado.
+        application = criar_app()
+        middleware_classes = [
+            getattr(m.cls, "__name__", "") for m in application.user_middleware
+        ]
+        assert "MetricasHTTPMiddleware" not in middleware_classes
+
+    def test_metricas_ligadas_instrumentam_ordens(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Wiring do composition root (ADR-032): quando configurar_metricas_api
+        # ativa, criar_app registra o listener de metricas de negocio de OS.
+        # Os dois imports em criar_app sao locais e resolvem o atributo do
+        # modulo na chamada — o monkeypatch na origem e efetivo.
+        chamadas: list[str] = []
+        monkeypatch.setattr(
+            "src.compartilhado.infraestrutura.metrics.configurar_metricas_api",
+            lambda app: chamadas.append("configurar") or True,
+        )
+        monkeypatch.setattr(
+            "src.ordem_servico.infraestrutura.metrics.instrumentar_metricas_de_ordens",
+            lambda: chamadas.append("instrumentar"),
+        )
+
+        criar_app()
+
+        assert chamadas == ["configurar", "instrumentar"]
+
     def test_docs_url_em_development(self) -> None:
         with patch.dict(os.environ, {"ENVIRONMENT": "development"}, clear=False):
             application = criar_app()
