@@ -7,7 +7,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # Runtime import (nao TYPE_CHECKING): com `from __future__ import annotations`,
 # o FastAPI avalia a annotation `Annotated[Session, Depends(...)]` em runtime;
-# sem o nome no modulo, o parametro viraria query param.
+# sem o nome no modulo, a resolucao da annotation falha no startup
+# (PydanticUserError: not fully defined) — verificado empiricamente.
 from sqlalchemy.orm import Session  # noqa: TC002
 from starlette.requests import Request  # noqa: TC002
 
