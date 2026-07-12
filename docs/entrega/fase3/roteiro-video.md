@@ -84,7 +84,7 @@ curl -s -X POST "$(terraform output -raw auth_url_prod)" \
 make gate     # lint + mypy strict + bandit + 34 testes (cobertura 100%) + terraform validate
 ```
 
-**Fala**: "Cada repositório tem CI e CD próprios com deploy automático por branch; com a cota do Actions esgotada, o gate local é o espelho obrigatório dos mesmos passos — no app são 1.834 testes com 96,39% de cobertura."
+**Fala**: "Cada repositório tem CI e CD próprios com deploy automático por branch; com a cota do Actions esgotada, o gate local é o espelho obrigatório dos mesmos passos — no app são 1.834 testes com 96,4% de cobertura."
 
 **Evidência no ar**: workflows nos 4 repos OU run verde; `make gate` terminando verde com cobertura 100%.
 
@@ -176,7 +176,7 @@ curl -si http://localhost:18000/api/v1/ordens-de-servico/ \
 
 ### 8. Encerramento (30 s)
 
-- Qualidade sustentada: **1.834 testes** com cobertura **96,39%** no app (gate ≥ 95%), lambda com **34 testes** e **100%** de cobertura, contratos de camadas por import-linter, scans de segurança verdes na HEAD (bandit + pip-audit — [entrega-fase-3.md §5](entrega-fase-3.md)).
+- Qualidade sustentada: **1.834 testes** com cobertura **96,4%** no app (gate ≥ 95%), lambda com **34 testes** e **100%** de cobertura, contratos de camadas por import-linter, scans de segurança verdes na HEAD (bandit + pip-audit — [entrega-fase-3.md §5](entrega-fase-3.md)).
 - Decisões registradas: ADRs 026–033 + RFC-003; rastreabilidade completa em [entrega-fase-3.md](entrega-fase-3.md).
 - Quatro repositórios (+ docs) privados, compartilhados com `soat-architecture`.
 

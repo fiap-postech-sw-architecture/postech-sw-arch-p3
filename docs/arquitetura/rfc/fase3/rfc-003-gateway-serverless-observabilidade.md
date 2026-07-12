@@ -21,7 +21,7 @@ Como nas [RFC-001](../rfc-001-design-do-sistema.md) e [RFC-002](../fase2/rfc-002
 | **Proposta Técnica** | Seções 2 (Topologia de nuvem), 3 (Topologia local espelho), 4 (Diagrama de componentes), 5 (Diagramas de sequência), 6 (Deploy multi-repo), 7 (Correlação de logs e traces). |
 | **Impacto Esperado** | RF-025–RF-027, RN-021/RN-022 e RNF-025–RNF-030 endereçados com custo pessoal zero (AWS Academy), desenvolvimento 100% local e nuvem restrita a janelas de validação/demo. |
 | **Alternativas Consideradas** | Detalhadas decisão a decisão nos [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md) a [ADR-033](../../adr/fase3/033-cicd-multi-repo.md). Resumo na seção 8. |
-| **Pontos em Aberto** | Nome final da rota de autenticação no gateway; mecanismo de integração gateway → app no EKS (VPC Link × endpoint público); colocação da Lambda na VPC do RDS; todos marcados como *detalhamento, decisão na implementação* nas seções 2 e 5. Gestão do `JWT_SECRET` decidida no ADR-033 (GitHub Secrets/`TF_VAR_*`; SSM/Secrets Manager descartados pelo IAM restrito do Learner Lab). |
+| **Pontos em Aberto** | **Decididos na implementação**: nome da rota de autenticação — `POST /auth` (`terraform/main.tf` do repo `p3-lambda`); integração gateway → app no EKS — integração `HTTP_PROXY` para a URL pública do Service LoadBalancer ([Adendo (c) do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#c-ordem-de-deploy-corrigida)). **Segue em aberto**: colocação da Lambda na VPC do RDS (*detalhamento, decisão na implementação*, seção 2). Gestão do `JWT_SECRET` decidida no ADR-033 (GitHub Secrets/`TF_VAR_*`; SSM/Secrets Manager descartados pelo IAM restrito do Learner Lab). |
 
 ---
 
@@ -186,7 +186,7 @@ O desenvolvimento é **100% local** ([ADR-026](../../adr/fase3/026-cloud-alvo-aw
 
 - **kind + `k8s/`**: o cluster local da fase 2 permanece o alvo de dev e demo sem custo ([ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md)), agora provisionado pelo dev-loop (`make`) em vez do Terraform do monorepo; o PostgreSQL 16 local roda em Docker/kind com o mesmo engine e versão do RDS;
 - **docker-compose**: o caminho rápido de desenvolvimento (app + banco + Mailpit + Redis), herdado sem mudança;
-- **SAM CLI** ([ADR-029](../../adr/fase3/029-emulacao-local-lambda.md)): `sam local invoke` e `sam local start-api` emulam o par API Gateway + Lambda **apenas para a rota de autenticação**, com o runtime real `python3.13` em container; os testes que valem para cobertura e CI são pytest puro (handler direto + testcontainers), sem emulação.
+- **SAM CLI** ([ADR-029](../../adr/fase3/029-emulacao-local-lambda.md)): `sam local invoke` e `sam local start-api` emulam o par API Gateway + Lambda **para a rota de autenticação e para a rota protegida com o Lambda authorizer** (tabela de paridade abaixo), com o runtime real `python3.13` em container; os testes que valem para cobertura e CI são pytest puro (handler direto + testcontainers), sem emulação.
 
 Paridade cloud × local, componente a componente:
 
@@ -262,7 +262,7 @@ Notas de leitura:
 
 - Linhas cheias são o caminho principal de requisições e dados; pontilhadas são fluxos de autorização, telemetria e coleta.
 - Rotas públicas (`GET /api/v1/saude`, acompanhamento público) passam pelo gateway **sem** authorizer.
-- No ambiente local (seção 3), a caixa `borda` é substituída por `sam local start-api` (só a rota de autenticação) e o EKS pelo kind — o resto do diagrama é idêntico.
+- No ambiente local (seção 3), a caixa `borda` é substituída por `sam local start-api` (rota de autenticação + rota protegida com o authorizer; sem o proxy até o app) e o EKS pelo kind — o resto do diagrama é idêntico.
 
 ## 5. Diagramas de sequência
 
@@ -298,17 +298,21 @@ sequenceDiagram
     rect rgb(240, 248, 240)
         Note over C,APP: Consumo de rota protegida (RF-026)
         C->>GW: request + Authorization Bearer
-        GW->>AZ: valida o JWT (Lambda authorizer)
-        alt token inválido ou ausente
-            AZ-->>GW: deny
-            GW-->>C: 401 (não chega ao app)
-        else token válido
-            AZ-->>GW: allow
-            GW->>APP: roteia por prefixo (propaga X-Request-ID)
-            APP->>APP: revalida JWT + RBAC (defense in depth)
-            APP->>DB: consulta/escrita
-            APP-->>GW: resposta
-            GW-->>C: resposta
+        alt token ausente
+            GW-->>C: 401 (identity source ausente — não chega ao authorizer)
+        else token presente
+            GW->>AZ: valida o JWT (Lambda authorizer)
+            alt token inválido
+                AZ-->>GW: deny
+                GW-->>C: 403 (não chega ao app)
+            else token válido
+                AZ-->>GW: allow
+                GW->>APP: roteia por prefixo (propaga X-Request-ID)
+                APP->>APP: revalida JWT + RBAC (defense in depth)
+                APP->>DB: consulta/escrita
+                APP-->>GW: resposta
+                GW-->>C: resposta
+            end
         end
     end
 ```
@@ -370,6 +374,8 @@ Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo
 | `p3-lambda` | gates Python (cobertura ≥ 95%) + `sam validate` | `terraform apply` de gateway + functions |
 | `p3` (app) | lint, typecheck, segurança, testes ≥ 95% (herdado do p2) | build da imagem + deploy dos manifests `k8s/` no cluster |
 
+> **Nota** ([Adendo (b) do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#b-homolog-nos-repos-de-infra-terraform-plan)): nos repos de infra (`p3-infra-k8s`, `p3-infra-db`), push em `homolog` executa **`terraform plan`** — o apply automático acontece só na `main`; duplicar EKS + RDS para um homolog de infra é inviável no budget do Learner Lab. App e lambda mantêm homolog real.
+
 **Ordem de deploy entre repositórios — documentada, não automatizada** (ordem corrigida no [Adendo do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#adendo-2026-07-11--limitações-constatadas-e-decisões-complementares), item (c)):
 
 ```
@@ -391,7 +397,7 @@ O requisito RNF-029 exige logs JSON com correlação entre requisições — e a
 
 - **Nascimento do id**: o `X-Request-ID` passa a nascer **no gateway** — o API Gateway gera um `requestId` por requisição (`$context.requestId`) e o propaga ao backend como header. *Detalhamento, decisão na implementação*: usar o `requestId` nativo como valor do header ou gerar UUID próprio numa transformação de request.
 - **Lambda**: a function de autenticação loga em JSON estruturado incluindo o request id recebido do gateway — o 401 de um CPF inativo é correlacionável com a tentativa vista na borda.
-- **App**: o middleware atual (`src/compartilhado/interfaces/middleware.py`) **gera** um UUID por requisição e o vincula ao contexto do structlog; na fase 3 ele passa a **aceitar o id externo** vindo do gateway (gerando um apenas na ausência — caso do tráfego local sem gateway), sem quebrar o scrub de PII — é o gap apontado no [gap analysis](../../../requisitos/fase3/gap-analysis-fase-3.md) (RNF-029 e §5).
+- **App**: o middleware (`src/compartilhado/interfaces/middleware.py`) **já aceita o `X-Request-ID` externo** vindo do gateway quando válido, gerando um UUID apenas na ausência (caso do tráfego local sem gateway) ou quando o valor é inválido, sem quebrar o scrub de PII — o gap apontado no [gap analysis](../../../requisitos/fase3/gap-analysis-fase-3.md) (RNF-029 e §5) está fechado na implementação (`middleware.py`, `dispatch`).
 - **Loki**: o Promtail agrega os logs JSON dos pods com labels por workload (app, relay, monitoramento); como o `request_id` é campo do JSON, a consulta no Grafana filtra por ele e reconstrói a linha do tempo de uma requisição atravessando app e relay ([ADR-032](../../adr/fase3/032-monitoramento-grafana-loki.md)).
 - **Traces**: a instrumentação OTel herdada ([ADR-020](../../adr/fase2/020-observabilidade-opentelemetry.md)) exporta ao Jaeger, com `OTEL_ENABLED` ligado por padrão nos ambientes de demo; o request id nos logs e o trace no Jaeger dão as duas vistas do mesmo request exigidas no vídeo ("logs e traces em execução").
 
@@ -404,7 +410,7 @@ O requisito RNF-029 exige logs JSON com correlação entre requisições — e a
 | 3 | Paridade parcial do gateway: o trecho gateway → app no EKS não existe localmente — só testável na AWS | [ADR-027](../../adr/fase3/027-api-gateway-aws.md) | `sam local start-api` cobre a rota de autenticação; validação JWT redundante no app iguala a semântica de segurança; teste do roteamento completo planejado dentro da primeira sessão de validação |
 | 4 | EKS com `LabRole` fixa: IAM não-idiomático (sem roles mínimas por recurso), inaceitável em produção real | [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md), [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | restrição dura da conta, documentada como concessão; Terraform referencia a role por data source — trocar para roles próprias em conta real é mudança pontual |
 | 5 | Cota do GitHub Actions esgotada: "pipelines funcionais" (entregável) não demonstráveis até a renovação | [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | gate local espelho obrigatório; workflows prontos para o primeiro run verde; renovar a cota antes da gravação do vídeo |
-| 6 | Correlação quebrada na borda: middleware atual ignora id externo; scrub de PII precisa continuar valendo | gap analysis §5 | mudança pontual no middleware (aceitar id do gateway), coberta por teste; seção 7 |
+| 6 | Correlação quebrada na borda: o middleware original ignorava id externo; scrub de PII precisa continuar valendo | gap analysis §5 | **Mitigado (implementado)**: o middleware aceita o `X-Request-ID` do gateway quando válido, coberto por teste; seção 7 |
 | 7 | Deriva entre template SAM e Terraform da function (dois descritores) | [ADR-029](../../adr/fase3/029-emulacao-local-lambda.md) | fronteira de papéis explícita: mudança real sempre no Terraform; o template segue para manter a emulação fiel; `sam deploy` proibido |
 | 8 | Drift entre overlays kind × EKS | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | base `k8s/` única; overlay EKS restrito ao que de fato difere do kind (imagens via GHCR com `imagePullSecrets`, Service `LoadBalancer` na API, `DATABASE_URL` via Secret `postgres-credentials` apontando ao RDS); validação no kind a cada PR |
 | 9 | Ordem manual de deploy entre repos violada por descuido (ex.: lambda antes do banco existir) | [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | ordem documentada no README de cada repo e no runbook da demo |
