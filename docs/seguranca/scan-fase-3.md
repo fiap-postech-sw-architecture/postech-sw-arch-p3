@@ -2,7 +2,7 @@
 
 > [↑ Raiz do projeto](../../README.md) · [↑ Segurança](README.md)
 
-> **Versão**: 1.0 — bateria executada em 11/07/2026 na árvore de trabalho da HEAD atual dos repositórios `p3` e `p3-lambda`. Princípio de evidência local primeiro: enquanto a cota do GitHub Actions da organização estiver esgotada, os scanners executáveis localmente rodam via gate espelho ([ADR-033](../arquitetura/adr/fase3/033-cicd-multi-repo.md)); trivy e gitleaks permanecem commitados nos workflows aguardando a cota. Sucede o [scan-fase-2.md](scan-fase-2.md), cuja baseline o snapshot da fase 3 herda.
+> **Versão**: 1.1 — atualiza a seção SonarQube com o fechamento dos 143 code smells (PR #6). Bateria executada em 11-12/07/2026 na árvore de trabalho da HEAD atual dos repositórios `p3` e `p3-lambda`. Princípio de evidência local primeiro: enquanto a cota do GitHub Actions da organização estiver esgotada, os scanners executáveis localmente rodam via gate espelho ([ADR-033](../arquitetura/adr/fase3/033-cicd-multi-repo.md)); trivy e gitleaks permanecem commitados nos workflows aguardando a cota. Sucede o [scan-fase-2.md](scan-fase-2.md), cuja baseline o snapshot da fase 3 herda.
 
 ## Escopo
 
@@ -25,7 +25,7 @@ Bateria da fase 3 sobre as camadas do pipeline de segurança ([ADR-011](../arqui
 | pip-audit | SCA (deps) | ambiente resolvido do `uv.lock` | **0 vulnerabilidades** conhecidas |
 | OWASP ZAP (baseline) | DAST | API viva (stack compose, `make dast`) | **FAIL 0 · WARN 0 · PASS 65** em 58 URLs — [sumário persistido](../entrega/fase3/evidencias/zap-baseline-2026-07-11.txt) |
 | CodeQL (suíte de qualidade) | SAST semântico | código Python (`make codeql-quality`) | **0 findings ativos** |
-| SonarQube (Community, local) | Análise estática + hotspots | `src/` + coverage importado | **Quality Gate Passed** — 0 bugs, 0 vulnerabilities, ratings A/A/A; 94,6% no denominador do Sonar (o gate real mede 96,4%); 3 hotspots revisados como SAFE |
+| SonarQube (Community, local) | Análise estática + hotspots | `src/` + coverage importado | **Quality Gate Passed** — 0 bugs, 0 vulnerabilities, 0 hotspots, 0 code smells (143 zerados no PR #6), ratings A/A/A; 94,6% no denominador do Sonar (gate real 96,8%) |
 | SBOM (CycloneDX, `make sbom`) | Inventário de dependências | deps de runtime do `uv.lock` | **Gerado e validado** — 48 refs |
 | trivy · gitleaks | SCA (imagem) / segredos | imagem Docker, árvore git | **Pendentes da cota do Actions** — commitados no CI; última execução verde em [scan-fase-2.md](scan-fase-2.md) |
 
@@ -47,7 +47,20 @@ Suíte de qualidade local (`make codeql-quality`, paridade com o default setup d
 
 ## SonarQube (scan manual de fechamento)
 
-SonarQube Community local + `sonar-scanner` com coverage importado: Quality Gate Passed, com 0 bugs, 0 vulnerabilities, ratings A/A/A e 0% duplicação. Cobertura de 94,6% no denominador do Sonar (o gate real do projeto mede 96,4%; divergência de universo documentada no `sonar-project.properties`). Os 3 security hotspots apontados são os mesmos da fase 2, revisados como SAFE com justificativa inline no código.
+SonarQube Community local + `sonar-scanner` com coverage importado: Quality Gate **Passed**, com 0 bugs, 0 vulnerabilities, 0 security hotspots, 0 code smells e 0% duplicação. Cobertura de 94,6% no denominador do Sonar (o gate real do projeto mede 96,8%; divergência de universo documentada no `sonar-project.properties`). Screenshot do Quality Gate em [entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png](../entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png).
+
+O primeiro scan apontou 3 security hotspots (os mesmos da fase 2: ReDoS na regex de e-mail e dois avisos de `http://` no exporter OTLP) — todos revisados como SAFE com justificativa inline no código — e **143 code smells** de maintainability (rating A, até então informativos, nunca corrigidos). Os 143 foram zerados no [PR #6](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/pull/6):
+
+| Regra | Qtd | Correção |
+|---|---|---|
+| S8410 | 98 | `param: Tipo = Depends(...)` → `Annotated[Tipo, Depends(...)]` nos 7 routers (exigiu `Session` em import runtime + `# noqa: TC002`: `Annotated[Session, Depends(...)]` é resolvido em runtime pelo FastAPI mesmo com `from __future__ import annotations`) |
+| S8409 | 17 | `response_model` redundante removido (idêntico ao retorno anotado — OpenAPI byte-idêntico antes/depois) |
+| S1186 | 22 | Docstrings de contrato nos métodos abstratos dos ports de domínio + `unit_of_work` |
+| S5886 | 3 | `copy.replace` (py3.13+) devolve o tipo concreto do DTO nas queries de OS, sem cast |
+| S1110 | 2 | Parênteses redundantes |
+| S3776 | 1 | Complexidade cognitiva do mapeamento de veículo reduzida de 19 para 9 (funções de reidratação içadas) |
+
+Verificação: `make check` verde (ruff + lint-arch + mypy strict + bandit), suíte completa 100% verde sem erro de coleta (o registro de rotas do FastAPI acontece em import — um `Annotated`/import quebrado estouraria a coleta, não só uma asserção). Re-scan na HEAD final confirma `code_smells: 0`.
 
 ## SBOM (CycloneDX)
 
