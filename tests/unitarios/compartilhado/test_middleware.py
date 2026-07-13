@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -78,6 +80,52 @@ class TestSecurityHeadersMiddleware:
         resp2 = client.get("/saude")
 
         assert resp1.headers["X-Request-ID"] != resp2.headers["X-Request-ID"]
+
+    def test_x_request_id_externo_valido_e_aceito(self) -> None:
+        # RNF-029 / ADR-032: o id gerado na borda (API Gateway) e propagado —
+        # mesmo valor no contexto de log e no header de resposta.
+        app = _criar_app_com_saude()
+        app.add_middleware(SecurityHeadersMiddleware)
+        client = TestClient(app)
+        id_externo = "apigw-req_1234.ABC-def"
+
+        resp = client.get("/saude", headers={"X-Request-ID": id_externo})
+
+        assert resp.headers["X-Request-ID"] == id_externo
+
+    @pytest.mark.parametrize(
+        "id_invalido",
+        [
+            "",  # vazio nao e id
+            "a" * 129,  # acima do limite de 128 chars
+            "tem espaco",  # charset fora do seguro
+            "quebra\tde-linha",  # controle
+            "id;com;delimitador",  # metacaractere de header fora do charset
+            "injecao<script>",  # metacaracteres
+        ],
+    )
+    def test_x_request_id_externo_invalido_e_descartado(self, id_invalido: str) -> None:
+        # Id invalido nunca e ecoado de volta (anti log/header injection):
+        # um uuid4 novo assume.
+        app = _criar_app_com_saude()
+        app.add_middleware(SecurityHeadersMiddleware)
+        client = TestClient(app)
+
+        resp = client.get("/saude", headers={"X-Request-ID": id_invalido})
+
+        assert resp.headers["X-Request-ID"] != id_invalido
+        # O substituto e um uuid4 valido.
+        UUID(resp.headers["X-Request-ID"])
+
+    def test_x_request_id_no_limite_de_128_chars_e_aceito(self) -> None:
+        app = _criar_app_com_saude()
+        app.add_middleware(SecurityHeadersMiddleware)
+        client = TestClient(app)
+        id_limite = "x" * 128
+
+        resp = client.get("/saude", headers={"X-Request-ID": id_limite})
+
+        assert resp.headers["X-Request-ID"] == id_limite
 
     def test_csp_nao_aplicado_em_rotas_de_docs(self) -> None:
         app = FastAPI()

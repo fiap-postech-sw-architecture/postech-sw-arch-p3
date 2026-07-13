@@ -1,0 +1,21 @@
+# EKS: o alembic migra o RDS (postgres-credentials), nao o Postgres de demo
+# do kind; pull no GHCR privado. Aplicado num passe proprio ANTES de api e
+# relay (TD-026) — ver ordem no kustomization.yaml e no cd.yml (deploy-eks).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pytstop-migrate
+  namespace: pytstop
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-credentials
+      containers:
+        - name: migrate
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: DATABASE_URL

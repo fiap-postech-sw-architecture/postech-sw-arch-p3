@@ -1,0 +1,13 @@
+# Exposicao publica da API no EKS: LoadBalancer (AWS provisiona um NLB/CLB
+# com hostname publico). E o endpoint que o API Gateway (repo p3-lambda,
+# ADR-027) usa como integracao HTTP — a RFC-003 §2 marca VPC Link × endpoint
+# publico como detalhamento de implementacao; adotado o endpoint publico por
+# simplicidade (sem VPC Link/ENI extra no Learner Lab). A validacao JWT
+# redundante no app cobre o acesso direto ao LB (defense in depth, ADR-027).
+apiVersion: v1
+kind: Service
+metadata:
+  name: pytstop-api
+  namespace: pytstop
+spec:
+  type: LoadBalancer

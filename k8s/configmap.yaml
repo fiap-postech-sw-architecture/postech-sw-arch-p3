@@ -68,6 +68,9 @@ data:
   # compose e CI nao pagam custo algum.
   OTEL_ENABLED: "true"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+  # Metricas Prometheus da propria API em /metrics (ADR-032; RF-027/RNF-028).
+  # Default do codigo e off (mesmo racional do OTEL_ENABLED acima).
+  API_METRICS_ENABLED: "true"
   # Store do rate limiter (TD-016): sob o HPA (hpa.yaml) cada replica
   # contaria sozinha num store em memoria, furando o limite global. Aponta
   # para o Service `redis` deste namespace (redis.yaml) -- contador unico e

@@ -56,6 +56,11 @@ def _falhar_com_resumo(agregado: ResultadoAgregado) -> None:
     )
 
 
+# Mesmo racional do timeout de test_plano_ci: o backoff de rate-limit do /login
+# (5/min) e legitimo e pode passar de duas janelas de Retry-After (~65s cada);
+# o teto global de 120s do pyproject cortaria antes. Replica o fix do PR #200
+# do p2 (que fixou os dois testes; aqui o test_plano_ci ja tinha, faltava este).
+@pytest.mark.timeout(300)
 @pytest.mark.slowest
 def test_plano_full(config: FullTestConfig, seed_recursos: dict[str, Any]) -> None:
     """Roda o plano completo incluindo sleeps reais (E2E integrado completo).
@@ -76,6 +81,11 @@ def test_plano_full(config: FullTestConfig, seed_recursos: dict[str, Any]) -> No
     _falhar_com_resumo(agregado)
 
 
+# timeout proprio (pyproject deixa o teto global em 120s): o plano contem a
+# RbacMatrixJourney com timeout_s=180 (+5 de folga) e, em maquina rapida, ate
+# duas esperas de janela do rate limit de /login (~65s cada) — 120s mata o
+# teste antes de o proprio orquestrador decidir (observado local 2026-07-11).
+@pytest.mark.timeout(300)
 @pytest.mark.slow
 def test_plano_ci(config: FullTestConfig, seed_recursos: dict[str, Any]) -> None:
     """Roda o plano reduzido sem sleeps — roda em CI."""

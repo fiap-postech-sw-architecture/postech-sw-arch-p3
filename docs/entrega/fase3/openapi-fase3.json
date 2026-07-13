@@ -1,0 +1,3954 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "PytStop",
+  "version": "0.2.0"
+ },
+ "paths": {
+  "/api/v1/saude": {
+   "get": {
+    "tags": [
+     "publico"
+    ],
+    "summary": "Health probe",
+    "description": "Health probe para Kubernetes/load balancer. Retorna 200 quando o app sobe.\n\n``async def`` de proposito: as rotas de API do app sao sync (``def``), entao\no FastAPI as roda no threadpool do anyio (~40 workers). Sob carga que satura\nesse pool (ex.: teste de carga do HPA), uma ``saude`` sync ficaria na fila\nATRAS do threadpool cheio e estouraria o ``timeoutSeconds`` das probes ->\nliveness reinicia o pod EXATAMENTE no pico (restart storm que derrota o\nHPA: menos replicas durante o spike). Como ``async``, esta rota corre\ndireto no event loop -- ocioso enquanto o trabalho sync esta no threadpool\n-- e responde em microssegundos mesmo com o pool saturado. Assim a liveness\nmede a semantica certa (\"event loop vivo?\" = processo saudavel), nao \"o\nthreadpool esta livre?\" (um sinal de CARGA, que a readiness/HPA ja tratam).\n\nISENTA do rate limit global (issue #81). As probes de liveness E readiness\ndo kubelet batem nesta rota, e TODAS saem de um unico IP (o no), que e a\nchave do limiter (``key_func=get_remote_address``). Sob HPA, com varios\npods, o agregado de probes do mesmo IP estouraria o limite global\n(``60/minute``) -> o kubelet receberia 429 no health check -> o pod seria\nmorto e reiniciado (restart storm auto-reforcante: escalar piora, o que\nderrota o proprio HPA). ``@limiter.exempt`` registra esta rota no\n``_exempt_routes`` do limiter; o ``SlowAPIMiddleware`` (``_should_exempt``)\nentao a deixa passar SEM aplicar os ``default_limits``. A isencao e\nCIRURGICA: so a saude e isenta — as rotas reais de API seguem com o limite\n(proprio ``@limiter.limit`` ou o default global).",
+    "operationId": "saude_api_v1_saude_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": {
+          "type": "string"
+         },
+         "type": "object",
+         "title": "Response Saude Api V1 Saude Get"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/acompanhamento": {
+   "post": {
+    "tags": [
+     "publico"
+    ],
+    "summary": "Consulta publica de ordem por placa + documento",
+    "description": "Retorna status/timestamps da ordem mais recente para o par informado.\n\nRaises:\n    HTTPException 404: placa+documento nao casam com nenhuma ordem.\n\nE ``POST`` (nao ``GET``) de proposito: placa e documento sao PII e viajam\nno CORPO, para nao ficarem gravados na URL — access log de proxy/ingress,\nhistorico de browser, logs de client HTTP (issue #180). A consulta e\nidempotente/somente-leitura; o metodo POST aqui e escolha de privacidade,\nnao de mutacao.\n\nO 404 e emitido tanto para placa inexistente quanto para documento\nincorreto — resposta de shape constante previne oracle attacks\n(um atacante nao consegue distinguir os dois cenarios pelo corpo\nda resposta; rate limit de 10/min por IP complementa a mitigacao).",
+    "operationId": "acompanhamento_api_v1_acompanhamento_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AcompanhamentoRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AcompanhamentoResponse"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Nenhuma ordem encontrada para o par placa+documento."
+     },
+     "429": {
+      "description": "Rate limit excedido (10/minute por IP)."
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/publico/ordens-de-servico/{ordem_id}/decisao-orcamento": {
+   "post": {
+    "tags": [
+     "publico"
+    ],
+    "summary": "Decisao externa (aprovacao/recusa) do orcamento",
+    "description": "Canal externo de aprovacao/recusa do orcamento (RF-022, ADR-021).\n\n``aprovada`` transita a OS para ``em_execucao`` pelo caminho inicial\nou complementar conforme o estado corrente; ``recusada`` cancela a\nOS com motivo fixo. A resposta reusa a projecao publica do\nacompanhamento (status/situacao + timestamps): nada de itens,\norcamento ou dados do cliente atravessa o canal externo (LGPD).",
+    "operationId": "decisao_orcamento_api_v1_publico_ordens_de_servico__ordem_id__decisao_orcamento_post",
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     },
+     {
+      "name": "x-webhook-timestamp",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Unix epoch (segundos) incluido no material assinado (TD-027).",
+       "title": "X-Webhook-Timestamp"
+      },
+      "description": "Unix epoch (segundos) incluido no material assinado (TD-027)."
+     },
+     {
+      "name": "x-webhook-signature",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "HMAC-SHA256 hex de {ordem_id}.{timestamp}. + body (TD-027).",
+       "title": "X-Webhook-Signature"
+      },
+      "description": "HMAC-SHA256 hex de {ordem_id}.{timestamp}. + body (TD-027)."
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DecisaoOrcamentoRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AcompanhamentoResponse"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Assinatura HMAC ausente/invalida ou timestamp fora da janela anti-replay (X-Webhook-Timestamp/Signature)."
+     },
+     "404": {
+      "description": "Ordem nao encontrada."
+     },
+     "409": {
+      "description": "Ordem fora de aguardando_aprovacao / aguardando_aprovacao_complementar."
+     },
+     "429": {
+      "description": "Rate limit excedido (10/minute por IP)."
+     },
+     "503": {
+      "description": "ORCAMENTO_WEBHOOK_TOKEN nao configurado no servidor (canal externo desabilitado)."
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/admin/outbox/dead": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Listar Dlq",
+    "description": "Lista as linhas da outbox em ``dead`` (DLQ).",
+    "operationId": "listar_dlq_api_v1_admin_outbox_dead_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "additionalProperties": true,
+          "type": "object"
+         },
+         "type": "array",
+         "title": "Response Listar Dlq Api V1 Admin Outbox Dead Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/api/v1/admin/outbox/dead/{outbox_id}/reenfileirar": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Reenfileirar Dlq",
+    "description": "Reenfileira uma linha ``dead`` (volta a ``pendente``, zera tentativas).\n\nAcao que muta estado (ressuscita um evento morto) — apos CONFIRMAR a\nmutacao (a linha existia em ``dead``), emite log de auditoria\n``outbox_reenfileirado_via_admin`` registrando QUEM (o admin autenticado,\nvia ``sub`` do JWT) e QUAL ``outbox_id``. O 404 (linha inexistente ou nao\n``dead``) nao muta nada e portanto NAO gera audit — o evento reflete so o\nque de fato aconteceu.",
+    "operationId": "reenfileirar_dlq_api_v1_admin_outbox_dead__outbox_id__reenfileirar_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "outbox_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Outbox Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Reenfileirar Dlq Api V1 Admin Outbox Dead  Outbox Id  Reenfileirar Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/clientes/": {
+   "post": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Cadastra um cliente (CPF ou CNPJ)",
+    "description": "Cria um cliente com documento unico (CPF/CNPJ); 409 se ja cadastrado.",
+    "operationId": "criar_cliente_api_v1_clientes__post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CriarClienteRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClienteResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Lista clientes paginados",
+    "description": "Retorna os clientes paginados (offset/limit) com o total; documento mascarado.",
+    "operationId": "listar_clientes_api_v1_clientes__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "default": 0,
+       "title": "Offset"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 100,
+       "minimum": 1,
+       "default": 20,
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClienteListaResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/clientes/{cliente_id}": {
+   "get": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Consulta um cliente por id",
+    "description": "Busca um cliente pelo id, com seus veiculos; 404 se nao existir.",
+    "operationId": "obter_cliente_api_v1_clientes__cliente_id__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClienteResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Atualiza nome e contato de um cliente",
+    "description": "Atualiza nome/contato do cliente; 404 se ausente, 409 se inativo/anonimizado.",
+    "operationId": "atualizar_cliente_api_v1_clientes__cliente_id__put",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AtualizarClienteRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClienteResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Desativa (soft-delete) um cliente sem OS ativa",
+    "description": "Desativa um cliente (terminal); 404 se ausente, 409 se possuir OS ativa.",
+    "operationId": "desativar_cliente_api_v1_clientes__cliente_id__delete",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/clientes/{cliente_id}/veiculos": {
+   "post": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Adiciona um veiculo a um cliente",
+    "description": "Anexa um veiculo (placa unica global); 409 se placa em uso ou cliente inativo.",
+    "operationId": "adicionar_veiculo_api_v1_clientes__cliente_id__veiculos_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AdicionarVeiculoRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/VeiculoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Lista os veiculos de um cliente",
+    "description": "Retorna todos os veiculos do cliente; 404 se o cliente nao existir.",
+    "operationId": "listar_veiculos_api_v1_clientes__cliente_id__veiculos_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/VeiculoResponse"
+         },
+         "title": "Response Listar Veiculos Api V1 Clientes  Cliente Id  Veiculos Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/clientes/{cliente_id}/veiculos/{veiculo_id}": {
+   "delete": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Remove um veiculo de um cliente",
+    "description": "Remove um veiculo do cliente; 404 se ausente, 409 se houver OS vinculada.",
+    "operationId": "remover_veiculo_api_v1_clientes__cliente_id__veiculos__veiculo_id__delete",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "name": "veiculo_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Veiculo Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/clientes/{cliente_id}/dados-pessoais": {
+   "get": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Consulta os dados pessoais de um cliente (LGPD acesso)",
+    "description": "Retorna os dados pessoais do cliente (LGPD acesso), auditando a consulta.",
+    "operationId": "obter_dados_pessoais_api_v1_clientes__cliente_id__dados_pessoais_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DadosPessoaisResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Anonimiza os dados de um cliente (LGPD erasure)",
+    "description": "Anonimiza os dados do cliente (LGPD erasure); 409 se houver OS ativa.",
+    "operationId": "excluir_dados_pessoais_api_v1_clientes__cliente_id__dados_pessoais_delete",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/clientes/{cliente_id}/dados-pessoais/exportar": {
+   "get": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Exporta os dados pessoais de um cliente (LGPD portabilidade)",
+    "description": "Exporta os dados pessoais do cliente (LGPD portabilidade), auditando o acesso.",
+    "operationId": "exportar_dados_pessoais_api_v1_clientes__cliente_id__dados_pessoais_exportar_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DadosPessoaisResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/clientes/{cliente_id}/consentimento": {
+   "post": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Registra um consentimento LGPD do cliente",
+    "description": "Registra a base legal de consentimento por tipo; 409 se ja houver ativo.",
+    "operationId": "registrar_consentimento_api_v1_clientes__cliente_id__consentimento_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ConsentimentoRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ConsentimentoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "clientes"
+    ],
+    "summary": "Revoga um consentimento LGPD do cliente",
+    "description": "Revoga o consentimento do tipo informado; 404 se nao houver consentimento.",
+    "operationId": "revogar_consentimento_api_v1_clientes__cliente_id__consentimento_delete",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "cliente_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "name": "tipo",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 50,
+       "title": "Tipo"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/servicos/": {
+   "post": {
+    "tags": [
+     "servicos"
+    ],
+    "summary": "Cadastra um servico no catalogo",
+    "description": "Cria um servico oferecido (nome, descricao, preco) e retorna seu id.",
+    "operationId": "criar_servico_api_v1_servicos__post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CriarServicoRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "servicos"
+    ],
+    "summary": "Lista servicos do catalogo paginados",
+    "description": "Retorna os servicos oferecidos paginados (offset/limit) com o total.",
+    "operationId": "listar_servicos_api_v1_servicos__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "default": 0,
+       "title": "Offset"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 100,
+       "minimum": 1,
+       "default": 20,
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ServicoListaResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/servicos/{servico_id}": {
+   "get": {
+    "tags": [
+     "servicos"
+    ],
+    "summary": "Consulta um servico do catalogo por id",
+    "description": "Busca um servico oferecido pelo id; 404 se nao existir.",
+    "operationId": "obter_servico_api_v1_servicos__servico_id__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "servico_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Servico Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "servicos"
+    ],
+    "summary": "Atualiza nome, descricao e preco de um servico",
+    "description": "Atualiza os dados de um servico oferecido; 404 se nao existir.",
+    "operationId": "atualizar_servico_api_v1_servicos__servico_id__put",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "servico_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Servico Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AtualizarServicoRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "servicos"
+    ],
+    "summary": "Desativa (soft-delete) um servico do catalogo",
+    "description": "Desativa logicamente um servico oferecido; 404 se nao existir.",
+    "operationId": "desativar_servico_api_v1_servicos__servico_id__delete",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "servico_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Servico Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/estoque/": {
+   "post": {
+    "tags": [
+     "Estoque"
+    ],
+    "summary": "Cadastra um item de estoque",
+    "description": "Cria um item de estoque (nome, descricao, quantidade, preco) e retorna seu id.",
+    "operationId": "criar_item_api_v1_estoque__post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CriarItemEstoqueRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ItemEstoqueResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "Estoque"
+    ],
+    "summary": "Lista itens de estoque paginados",
+    "description": "Retorna os itens de estoque paginados (offset/limit) com o total.",
+    "operationId": "listar_itens_api_v1_estoque__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "default": 0,
+       "title": "Offset"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 100,
+       "minimum": 1,
+       "default": 20,
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ItemEstoqueListaResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/estoque/{item_id}": {
+   "get": {
+    "tags": [
+     "Estoque"
+    ],
+    "summary": "Consulta um item de estoque por id",
+    "description": "Busca um item de estoque pelo id; 404 se nao existir.",
+    "operationId": "obter_item_api_v1_estoque__item_id__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "item_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Item Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ItemEstoqueResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "Estoque"
+    ],
+    "summary": "Atualiza nome, descricao e preco de um item de estoque",
+    "description": "Atualiza os dados cadastrais de um item (nao a quantidade); 404 se ausente.",
+    "operationId": "atualizar_item_api_v1_estoque__item_id__put",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "item_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Item Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AtualizarItemEstoqueRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ItemEstoqueResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "Estoque"
+    ],
+    "summary": "Desativa (soft-delete) um item de estoque",
+    "description": "Desativa logicamente um item de estoque; 404 se nao existir.",
+    "operationId": "desativar_item_api_v1_estoque__item_id__delete",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "item_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Item Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/estoque/{item_id}/quantidade": {
+   "patch": {
+    "tags": [
+     "Estoque"
+    ],
+    "summary": "Ajusta a quantidade em estoque de um item",
+    "description": "Define a nova quantidade absoluta em estoque do item; 404 se nao existir.",
+    "operationId": "ajustar_quantidade_api_v1_estoque__item_id__quantidade_patch",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "item_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Item Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AjustarQuantidadeRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ItemEstoqueResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "Cria uma nova ordem de servico",
+    "description": "Abre uma ordem de servico, opcionalmente ja com servicos e pecas.\n\nRF-020: itens informados no payload sao criados na mesma transacao\nda OS — item invalido (servico/peca inexistente, servico inativo)\naborta a criacao inteira. Payload sem itens equivale a fase 1.",
+    "operationId": "criar_ordem_api_v1_ordens_de_servico__post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CriarOrdemRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "Lista ordens paginadas por prioridade de status",
+    "description": "Pagina ordens por prioridade de status + antiguidade (RF-023).\n\nOrdenacao: EM_EXECUCAO > AGUARDANDO_APROVACAO (+ COMPLEMENTAR) >\nEM_DIAGNOSTICO > RECEBIDA; no grupo, mais antiga primeiro com desempate\npor id (RN-018/RN-020). ``total`` acompanha o filtro aplicado.",
+    "operationId": "listar_ordens_api_v1_ordens_de_servico__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "default": 0,
+       "title": "Offset"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 100,
+       "minimum": 1,
+       "default": 20,
+       "title": "Limit"
+      }
+     },
+     {
+      "name": "incluir_encerradas",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "description": "Inclui FINALIZADA/ENTREGUE/CANCELADA ao final da listagem (visao administrativa completa). Default exclui encerradas (RN-019/RN-020).",
+       "default": false,
+       "title": "Incluir Encerradas"
+      },
+      "description": "Inclui FINALIZADA/ENTREGUE/CANCELADA ao final da listagem (visao administrativa completa). Default exclui encerradas (RN-019/RN-020)."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemListaResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/metricas": {
+   "get": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "Projecao agregada de ordens (total + por status + tempo medio)",
+    "description": "Retorna total, contagem por status e tempo medio de execucao em minutos.",
+    "operationId": "metricas_api_v1_ordens_de_servico_metricas_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MetricasResponse"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}": {
+   "get": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "Consulta detalhada de uma ordem por id",
+    "description": "Retorna a projecao completa da ordem (itens + orcamento + timestamps).",
+    "operationId": "obter_ordem_api_v1_ordens_de_servico__ordem_id__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/itens": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "Adiciona um item a uma ordem",
+    "description": "Valida servico via ``CatalogoPort`` e adiciona o item a ordem.",
+    "operationId": "adicionar_item_api_v1_ordens_de_servico__ordem_id__itens_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AdicionarItemRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/itens/{item_id}": {
+   "delete": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "Remove um item da ordem e retorna a ordem atualizada",
+    "description": "Remove o item por id; retorna a ordem atualizada (status, lista de itens).\n\nRetorna 200 + body por consistencia com os outros endpoints de mutacao\n(convencao do PR #62: toda mutacao devolve ``OrdemDeServicoResponse``).",
+    "operationId": "remover_item_api_v1_ordens_de_servico__ordem_id__itens__item_id__delete",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     },
+     {
+      "name": "item_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Item Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/diagnostico": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "RECEBIDA -> EM_DIAGNOSTICO",
+    "description": "Transita a ordem para ``EM_DIAGNOSTICO`` e emite ``DiagnosticoIniciadoEvent``.",
+    "operationId": "iniciar_diagnostico_api_v1_ordens_de_servico__ordem_id__diagnostico_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/orcamento": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "EM_DIAGNOSTICO -> AGUARDANDO_APROVACAO",
+    "description": "Calcula o orcamento e transita a ordem para ``AGUARDANDO_APROVACAO``.",
+    "operationId": "gerar_orcamento_api_v1_ordens_de_servico__ordem_id__orcamento_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/aprovacao": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "AGUARDANDO_APROVACAO -> EM_EXECUCAO",
+    "description": "Aprova o orcamento, reserva estoque e transita para ``EM_EXECUCAO``.",
+    "operationId": "aprovar_orcamento_api_v1_ordens_de_servico__ordem_id__aprovacao_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/finalizacao": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "EM_EXECUCAO -> FINALIZADA",
+    "description": "Transita a ordem para ``FINALIZADA`` e emite ``ServicoFinalizadoEvent``.",
+    "operationId": "finalizar_servico_api_v1_ordens_de_servico__ordem_id__finalizacao_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/entrega": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "FINALIZADA -> ENTREGUE",
+    "description": "Transita a ordem para ``ENTREGUE`` e emite ``EntregaRegistradaEvent``.",
+    "operationId": "registrar_entrega_api_v1_ordens_de_servico__ordem_id__entrega_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/cancelamento": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "Qualquer estado ativo -> CANCELADA",
+    "description": "Cancela a ordem e libera reservas de estoque ativas (se houver).",
+    "operationId": "cancelar_ordem_api_v1_ordens_de_servico__ordem_id__cancelamento_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CancelarOrdemRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/orcamento-complementar": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "EM_EXECUCAO -> AGUARDANDO_APROVACAO_COMPLEMENTAR",
+    "description": "Regenera o orcamento apos novos itens e transita para aprovacao complementar.",
+    "operationId": "gerar_complementar_api_v1_ordens_de_servico__ordem_id__orcamento_complementar_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/aprovacao-complementar": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "AGUARDANDO_APROVACAO_COMPLEMENTAR -> EM_EXECUCAO (aprovado)",
+    "description": "Aprova o orcamento complementar e retorna a ordem a ``EM_EXECUCAO``.",
+    "operationId": "aprovar_complementar_api_v1_ordens_de_servico__ordem_id__aprovacao_complementar_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ordens-de-servico/{ordem_id}/rejeicao-complementar": {
+   "post": {
+    "tags": [
+     "ordens-de-servico"
+    ],
+    "summary": "AGUARDANDO_APROVACAO_COMPLEMENTAR -> EM_EXECUCAO (rejeitado)",
+    "description": "Rejeita o orcamento complementar e retorna a ordem a ``EM_EXECUCAO``.",
+    "operationId": "rejeitar_complementar_api_v1_ordens_de_servico__ordem_id__rejeicao_complementar_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/autenticacao/login": {
+   "post": {
+    "tags": [
+     "autenticacao"
+    ],
+    "summary": "Autentica e emite par de tokens",
+    "description": "Valida e-mail + senha e devolve access + refresh tokens (rate limit 5/min).\n\nCredenciais invalidas -> 401 (mesma resposta para e-mail inexistente ou\nsenha errada, evitando enumeration).",
+    "operationId": "login_api_v1_autenticacao_login_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LoginRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TokenResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/autenticacao/registrar": {
+   "post": {
+    "tags": [
+     "autenticacao"
+    ],
+    "summary": "Registra um novo usuario (admin)",
+    "description": "Cria um usuario com o papel informado. Endpoint admin-gated (RBAC).\n\nE-mail ja cadastrado -> 409. O papel e obrigatorio no corpo (nunca um\nadmin silencioso por omissao).",
+    "operationId": "registrar_api_v1_autenticacao_registrar_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RegistrarRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UsuarioResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/api/v1/autenticacao/logout": {
+   "post": {
+    "tags": [
+     "autenticacao"
+    ],
+    "summary": "Revoga o access e, opcionalmente, o refresh",
+    "description": "Revoga o access token do header; se o refresh vier no corpo, revoga-o tambem.\n\nSem o refresh, encerra so o access (compat com clientes que so mandam o\nheader). Header ausente -> 401.",
+    "operationId": "logout_api_v1_autenticacao_logout_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_logout_api_v1_autenticacao_logout_post"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": {
+          "type": "string"
+         },
+         "type": "object",
+         "title": "Response Logout Api V1 Autenticacao Logout Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/api/v1/autenticacao/refresh": {
+   "post": {
+    "tags": [
+     "autenticacao"
+    ],
+    "summary": "Rotaciona o par de tokens via refresh",
+    "description": "Troca um refresh token valido por um novo par (access + refresh).\n\nSingle-use: o refresh apresentado e revogado atomicamente. Refresh\ninvalido/expirado/ja consumido -> 401.",
+    "operationId": "refresh_api_v1_autenticacao_refresh_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RefreshRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TokenResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {
+   "AcompanhamentoRequest": {
+    "properties": {
+     "placa": {
+      "type": "string",
+      "maxLength": 8,
+      "minLength": 7,
+      "title": "Placa",
+      "description": "Placa do veiculo (7 chars sem hifen ou 8 com hifen)."
+     },
+     "documento": {
+      "type": "string",
+      "maxLength": 18,
+      "minLength": 11,
+      "title": "Documento",
+      "description": "CPF (11 digitos) ou CNPJ (14 digitos), com ou sem mascara."
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "placa",
+     "documento"
+    ],
+    "title": "AcompanhamentoRequest",
+    "description": "Corpo da consulta publica de acompanhamento (POST).\n\nPlaca e documento viajam no CORPO, nunca na URL: sao PII e nao devem\nparar em access log de proxy/ingress, historico de browser ou logs de\nclient HTTP (issue #180). As validacoes de tamanho espelham as que antes\nficavam nos ``Query(...)`` do endpoint."
+   },
+   "AcompanhamentoResponse": {
+    "properties": {
+     "status": {
+      "type": "string",
+      "title": "Status"
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     },
+     "atualizado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Atualizado Em"
+     },
+     "situacao": {
+      "type": "string",
+      "title": "Situacao",
+      "description": "Situacao no vocabulario do challenge (RF-021), derivada de `status`: Recebida, Em diagnóstico, Aguardando aprovação, Em execução, Finalizada, Entregue ou Cancelada. A espera de aprovacao complementar apresenta o mesmo rotulo de Aguardando aprovação.",
+      "readOnly": true
+     }
+    },
+    "type": "object",
+    "required": [
+     "status",
+     "criado_em",
+     "atualizado_em",
+     "situacao"
+    ],
+    "title": "AcompanhamentoResponse",
+    "description": "Projecao publica de acompanhamento (endpoint rate-limited).\n\nContem apenas status/situacao + timestamps; nao expoe cliente_id,\nveiculo_id, itens ou orcamento por razoes de privacidade (LGPD)."
+   },
+   "AdicionarItemRequest": {
+    "properties": {
+     "servico_catalogo_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Servico Catalogo Id",
+      "description": "Identificador do ServicoOferecido no contexto Catalogo."
+     },
+     "item_estoque_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Item Estoque Id",
+      "description": "Item de estoque consumido (None se for servico puro)."
+     },
+     "descricao": {
+      "type": "string",
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Descricao",
+      "description": "Descricao livre do item (visivel ao cliente)."
+     },
+     "quantidade": {
+      "type": "integer",
+      "exclusiveMinimum": 0.0,
+      "title": "Quantidade",
+      "description": "Quantidade em unidades (> 0)."
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "servico_catalogo_id",
+     "descricao",
+     "quantidade"
+    ],
+    "title": "AdicionarItemRequest",
+    "description": "Request body do endpoint ``POST /api/v1/ordens-de-servico/{id}/itens``."
+   },
+   "AdicionarVeiculoRequest": {
+    "properties": {
+     "placa": {
+      "type": "string",
+      "maxLength": 8,
+      "minLength": 7,
+      "title": "Placa"
+     },
+     "marca": {
+      "type": "string",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Marca"
+     },
+     "modelo": {
+      "type": "string",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Modelo"
+     },
+     "ano": {
+      "type": "integer",
+      "minimum": 1887.0,
+      "title": "Ano"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "placa",
+     "marca",
+     "modelo",
+     "ano"
+    ],
+    "title": "AdicionarVeiculoRequest",
+    "description": "Payload de entrada para adicao de veiculo a um cliente.\n\nO limite maximo do campo `ano` e resolvido dinamicamente pela regra do\ndominio (`ano_maximo_permitido()`), garantindo que o schema e o agregado\n`Veiculo` falhem consistentemente com o mesmo range — incluindo nos testes\nque congelam o ano maximo via monkeypatch."
+   },
+   "AjustarQuantidadeRequest": {
+    "properties": {
+     "nova_quantidade": {
+      "type": "integer",
+      "maximum": 1000000.0,
+      "minimum": 0.0,
+      "title": "Nova Quantidade"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "nova_quantidade"
+    ],
+    "title": "AjustarQuantidadeRequest"
+   },
+   "AtualizarClienteRequest": {
+    "properties": {
+     "nome": {
+      "type": "string",
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Nome"
+     },
+     "contato": {
+      "type": "string",
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Contato"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "nome",
+     "contato"
+    ],
+    "title": "AtualizarClienteRequest",
+    "description": "Payload de entrada para atualizacao via PUT /clientes/{id}."
+   },
+   "AtualizarItemEstoqueRequest": {
+    "properties": {
+     "nome": {
+      "type": "string",
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Nome"
+     },
+     "descricao": {
+      "type": "string",
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Descricao"
+     },
+     "preco_unitario": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "string",
+        "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+       }
+      ],
+      "title": "Preco Unitario"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "nome",
+     "descricao",
+     "preco_unitario"
+    ],
+    "title": "AtualizarItemEstoqueRequest"
+   },
+   "AtualizarServicoRequest": {
+    "properties": {
+     "nome": {
+      "type": "string",
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Nome"
+     },
+     "descricao": {
+      "type": "string",
+      "maxLength": 5000,
+      "minLength": 1,
+      "title": "Descricao"
+     },
+     "preco": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "string",
+        "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+       }
+      ],
+      "title": "Preco"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "nome",
+     "descricao",
+     "preco"
+    ],
+    "title": "AtualizarServicoRequest"
+   },
+   "Body_logout_api_v1_autenticacao_logout_post": {
+    "properties": {
+     "refresh_token": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Refresh Token"
+     }
+    },
+    "type": "object",
+    "title": "Body_logout_api_v1_autenticacao_logout_post"
+   },
+   "CancelarOrdemRequest": {
+    "properties": {
+     "motivo": {
+      "type": "string",
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Motivo",
+      "description": "Motivo livre do cancelamento (obrigatorio, <= 500 chars)."
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "motivo"
+    ],
+    "title": "CancelarOrdemRequest",
+    "description": "Request body do endpoint ``POST /api/v1/ordens-de-servico/{id}/cancelamento``."
+   },
+   "ClienteListaResponse": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/ClienteResumoResponse"
+      },
+      "type": "array",
+      "title": "Items"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     },
+     "offset": {
+      "type": "integer",
+      "title": "Offset"
+     },
+     "limit": {
+      "type": "integer",
+      "title": "Limit"
+     }
+    },
+    "type": "object",
+    "required": [
+     "items",
+     "total",
+     "offset",
+     "limit"
+    ],
+    "title": "ClienteListaResponse",
+    "description": "Envelope de listagem paginada de clientes."
+   },
+   "ClienteResponse": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "nome": {
+      "type": "string",
+      "title": "Nome"
+     },
+     "documento_formatado": {
+      "type": "string",
+      "title": "Documento Formatado"
+     },
+     "documento_mascarado": {
+      "type": "string",
+      "title": "Documento Mascarado"
+     },
+     "tipo_documento": {
+      "type": "string",
+      "title": "Tipo Documento"
+     },
+     "contato": {
+      "type": "string",
+      "title": "Contato"
+     },
+     "ativo": {
+      "type": "boolean",
+      "title": "Ativo"
+     },
+     "veiculos": {
+      "items": {
+       "$ref": "#/components/schemas/VeiculoResponse"
+      },
+      "type": "array",
+      "title": "Veiculos"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "nome",
+     "documento_formatado",
+     "documento_mascarado",
+     "tipo_documento",
+     "contato",
+     "ativo",
+     "veiculos"
+    ],
+    "title": "ClienteResponse",
+    "description": "Representacao JSON completa do cliente (com veiculos aninhados)."
+   },
+   "ClienteResumoResponse": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "nome": {
+      "type": "string",
+      "title": "Nome"
+     },
+     "documento_mascarado": {
+      "type": "string",
+      "title": "Documento Mascarado"
+     },
+     "tipo_documento": {
+      "type": "string",
+      "title": "Tipo Documento"
+     },
+     "contato": {
+      "type": "string",
+      "title": "Contato"
+     },
+     "ativo": {
+      "type": "boolean",
+      "title": "Ativo"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "nome",
+     "documento_mascarado",
+     "tipo_documento",
+     "contato",
+     "ativo"
+    ],
+    "title": "ClienteResumoResponse",
+    "description": "Representacao resumida do cliente usada em listagens paginadas."
+   },
+   "ConsentimentoRequest": {
+    "properties": {
+     "tipo": {
+      "type": "string",
+      "maxLength": 50,
+      "minLength": 1,
+      "title": "Tipo",
+      "examples": [
+       "tratamento_dados",
+       "marketing",
+       "compartilhamento"
+      ]
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "tipo"
+    ],
+    "title": "ConsentimentoRequest",
+    "description": "Payload de entrada para registro de consentimento LGPD."
+   },
+   "ConsentimentoResponse": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "cliente_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Cliente Id"
+     },
+     "tipo": {
+      "type": "string",
+      "title": "Tipo"
+     },
+     "concedido_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Concedido Em"
+     },
+     "revogado_em": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Revogado Em"
+     },
+     "ativo": {
+      "type": "boolean",
+      "title": "Ativo"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "cliente_id",
+     "tipo",
+     "concedido_em",
+     "revogado_em",
+     "ativo"
+    ],
+    "title": "ConsentimentoResponse",
+    "description": "Representacao de consentimento LGPD."
+   },
+   "CriarClienteRequest": {
+    "properties": {
+     "nome": {
+      "type": "string",
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Nome"
+     },
+     "documento": {
+      "type": "string",
+      "maxLength": 18,
+      "minLength": 11,
+      "title": "Documento"
+     },
+     "tipo_documento": {
+      "type": "string",
+      "enum": [
+       "cpf",
+       "cnpj"
+      ],
+      "title": "Tipo Documento"
+     },
+     "contato": {
+      "type": "string",
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Contato"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "nome",
+     "documento",
+     "tipo_documento",
+     "contato"
+    ],
+    "title": "CriarClienteRequest",
+    "description": "Payload de entrada para criacao de cliente via POST /clientes."
+   },
+   "CriarItemEstoqueRequest": {
+    "properties": {
+     "nome": {
+      "type": "string",
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Nome"
+     },
+     "descricao": {
+      "type": "string",
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Descricao"
+     },
+     "quantidade": {
+      "type": "integer",
+      "maximum": 1000000.0,
+      "minimum": 0.0,
+      "title": "Quantidade"
+     },
+     "preco_unitario": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "string",
+        "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+       }
+      ],
+      "title": "Preco Unitario"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "nome",
+     "descricao",
+     "quantidade",
+     "preco_unitario"
+    ],
+    "title": "CriarItemEstoqueRequest"
+   },
+   "CriarOrdemRequest": {
+    "properties": {
+     "cliente_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Cliente Id",
+      "description": "Identificador do cliente dono do veiculo."
+     },
+     "veiculo_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Veiculo Id",
+      "description": "Identificador do veiculo a ser atendido."
+     },
+     "servicos": {
+      "items": {
+       "$ref": "#/components/schemas/ServicoDaOrdemRequest"
+      },
+      "type": "array",
+      "maxItems": 50,
+      "title": "Servicos",
+      "description": "Servicos a executar, ja na abertura da OS (opcional, max 50)."
+     },
+     "pecas": {
+      "items": {
+       "$ref": "#/components/schemas/PecaDaOrdemRequest"
+      },
+      "type": "array",
+      "maxItems": 50,
+      "title": "Pecas",
+      "description": "Pecas a consumir, ja na abertura da OS (opcional, max 50)."
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "cliente_id",
+     "veiculo_id"
+    ],
+    "title": "CriarOrdemRequest",
+    "description": "Request body do endpoint ``POST /api/v1/ordens-de-servico``.\n\n``servicos`` e ``pecas`` sao opcionais (RF-020): a OS pode nascer ja\ncom itens, criados na mesma transacao — qualquer item invalido\naborta a criacao inteira. Payloads da fase 1 (so ``cliente_id`` +\n``veiculo_id``) continuam validos e equivalentes."
+   },
+   "CriarServicoRequest": {
+    "properties": {
+     "nome": {
+      "type": "string",
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Nome"
+     },
+     "descricao": {
+      "type": "string",
+      "maxLength": 5000,
+      "minLength": 1,
+      "title": "Descricao"
+     },
+     "preco": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "string",
+        "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+       }
+      ],
+      "title": "Preco"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "nome",
+     "descricao",
+     "preco"
+    ],
+    "title": "CriarServicoRequest"
+   },
+   "DadosPessoaisResponse": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "nome": {
+      "type": "string",
+      "title": "Nome"
+     },
+     "documento_formatado": {
+      "type": "string",
+      "title": "Documento Formatado"
+     },
+     "tipo_documento": {
+      "type": "string",
+      "title": "Tipo Documento"
+     },
+     "contato": {
+      "type": "string",
+      "title": "Contato"
+     },
+     "veiculos": {
+      "items": {
+       "$ref": "#/components/schemas/VeiculoResponse"
+      },
+      "type": "array",
+      "title": "Veiculos"
+     },
+     "ativo": {
+      "type": "boolean",
+      "title": "Ativo"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "nome",
+     "documento_formatado",
+     "tipo_documento",
+     "contato",
+     "veiculos",
+     "ativo"
+    ],
+    "title": "DadosPessoaisResponse",
+    "description": "Dados pessoais exportados (LGPD direito de acesso)."
+   },
+   "DecisaoOrcamentoRequest": {
+    "properties": {
+     "decisao": {
+      "type": "string",
+      "enum": [
+       "aprovada",
+       "recusada"
+      ],
+      "title": "Decisao",
+      "description": "Decisao do cliente sobre o orcamento aguardando aprovacao: 'aprovada' transita a OS para em_execucao (caminho inicial ou complementar conforme o estado corrente); 'recusada' cancela a OS com motivo 'orcamento recusado pelo cliente'."
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "decisao"
+    ],
+    "title": "DecisaoOrcamentoRequest",
+    "description": "Request body do endpoint externo de decisao de orcamento (RF-022).\n\nCanal publico autenticado por assinatura HMAC por requisicao\n(``X-Webhook-Signature``/``X-Webhook-Timestamp``, TD-027). O\ncontrato e binario por design: ``recusada`` significa desistencia do\ncliente (OS cancelada com motivo fixo); a rejeicao parcial do\norcamento complementar continua exclusiva do endpoint interno."
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "type": "array",
+      "title": "Detail"
+     }
+    },
+    "type": "object",
+    "title": "HTTPValidationError"
+   },
+   "ItemDaOrdemResponse": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "servico_catalogo_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Servico Catalogo Id"
+     },
+     "servico_nome": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Servico Nome",
+      "description": "Nome do servico no catalogo, resolvido server-side."
+     },
+     "item_estoque_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Item Estoque Id"
+     },
+     "item_estoque_nome": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Item Estoque Nome",
+      "description": "Nome do item de estoque, resolvido server-side. None quando a linha e mao de obra (sem item_estoque_id)."
+     },
+     "descricao": {
+      "type": "string",
+      "title": "Descricao"
+     },
+     "quantidade": {
+      "type": "integer",
+      "title": "Quantidade"
+     },
+     "preco_unitario_centavos": {
+      "type": "integer",
+      "title": "Preco Unitario Centavos",
+      "description": "Preco unitario em centavos."
+     },
+     "subtotal_centavos": {
+      "type": "integer",
+      "title": "Subtotal Centavos",
+      "description": "Subtotal do item em centavos."
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "servico_catalogo_id",
+     "item_estoque_id",
+     "descricao",
+     "quantidade",
+     "preco_unitario_centavos",
+     "subtotal_centavos"
+    ],
+    "title": "ItemDaOrdemResponse",
+    "description": "Projecao de leitura de um item da ordem (centavos para moeda).\n\nInclui ``servico_nome`` e ``item_estoque_nome`` resolvidos server-side\npela query ``EnriquecerOrdemDeServico`` (via ports, issue #87) — assim\na UI exibe ``Troca de oleo`` / ``Filtro de oleo`` em vez de UUIDs sem\nprecisar de chamadas extras pro catalogo/estoque. Ambos sao nullable:\npos anonimizacao/exclusao cascata do servico/item, a OS continua\nvalida mas o nome perdido vira ``None``."
+   },
+   "ItemEstoqueListaResponse": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/ItemEstoqueResponse"
+      },
+      "type": "array",
+      "title": "Items"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     },
+     "offset": {
+      "type": "integer",
+      "title": "Offset"
+     },
+     "limit": {
+      "type": "integer",
+      "title": "Limit"
+     }
+    },
+    "type": "object",
+    "required": [
+     "items",
+     "total",
+     "offset",
+     "limit"
+    ],
+    "title": "ItemEstoqueListaResponse"
+   },
+   "ItemEstoqueResponse": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "nome": {
+      "type": "string",
+      "title": "Nome"
+     },
+     "descricao": {
+      "type": "string",
+      "title": "Descricao"
+     },
+     "quantidade": {
+      "type": "integer",
+      "title": "Quantidade"
+     },
+     "preco_unitario": {
+      "type": "string",
+      "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+      "title": "Preco Unitario"
+     },
+     "moeda": {
+      "type": "string",
+      "title": "Moeda"
+     },
+     "ativo": {
+      "type": "boolean",
+      "title": "Ativo"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "nome",
+     "descricao",
+     "quantidade",
+     "preco_unitario",
+     "moeda",
+     "ativo"
+    ],
+    "title": "ItemEstoqueResponse"
+   },
+   "LinhaOrcamentoResponse": {
+    "properties": {
+     "descricao": {
+      "type": "string",
+      "title": "Descricao"
+     },
+     "quantidade": {
+      "type": "integer",
+      "title": "Quantidade"
+     },
+     "preco_unitario_centavos": {
+      "type": "integer",
+      "title": "Preco Unitario Centavos",
+      "description": "Preco unitario em centavos."
+     },
+     "subtotal_centavos": {
+      "type": "integer",
+      "title": "Subtotal Centavos",
+      "description": "Subtotal da linha em centavos."
+     }
+    },
+    "type": "object",
+    "required": [
+     "descricao",
+     "quantidade",
+     "preco_unitario_centavos",
+     "subtotal_centavos"
+    ],
+    "title": "LinhaOrcamentoResponse",
+    "description": "Projecao de uma linha do orcamento congelado."
+   },
+   "LoginRequest": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+     },
+     "senha": {
+      "type": "string",
+      "maxLength": 128,
+      "minLength": 12,
+      "title": "Senha"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "email",
+     "senha"
+    ],
+    "title": "LoginRequest"
+   },
+   "MetricasResponse": {
+    "properties": {
+     "total": {
+      "type": "integer",
+      "title": "Total",
+      "description": "Total de ordens persistidas."
+     },
+     "por_status": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Por Status",
+      "description": "Contagem de ordens por status (chaves sao StatusOrdem.value)."
+     },
+     "tempo_medio_execucao_minutos": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tempo Medio Execucao Minutos",
+      "description": "Tempo medio em minutos entre criacao e atualizacao de ordens finalizadas/entregues. None se nao houver ordens finalizadas."
+     }
+    },
+    "type": "object",
+    "required": [
+     "total",
+     "por_status"
+    ],
+    "title": "MetricasResponse",
+    "description": "Projecao agregada de metricas de ordens."
+   },
+   "OrcamentoResponse": {
+    "properties": {
+     "total_centavos": {
+      "type": "integer",
+      "title": "Total Centavos",
+      "description": "Soma dos subtotais em centavos."
+     },
+     "gerado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Gerado Em"
+     },
+     "itens": {
+      "items": {
+       "$ref": "#/components/schemas/LinhaOrcamentoResponse"
+      },
+      "type": "array",
+      "title": "Itens"
+     }
+    },
+    "type": "object",
+    "required": [
+     "total_centavos",
+     "gerado_em",
+     "itens"
+    ],
+    "title": "OrcamentoResponse",
+    "description": "Projecao do orcamento (total + instante + linhas)."
+   },
+   "OrdemDeServicoResponse": {
+    "properties": {
+     "status": {
+      "type": "string",
+      "title": "Status",
+      "description": "StatusOrdem.value (ex: 'recebida', 'em_diagnostico')."
+     },
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "cliente_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Cliente Id"
+     },
+     "cliente_nome": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nome",
+      "description": "Nome do cliente, resolvido server-side. None se o cliente tiver sido removido apos a OS ser criada."
+     },
+     "veiculo_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Veiculo Id"
+     },
+     "veiculo_placa": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Veiculo Placa",
+      "description": "Placa do veiculo, resolvida server-side. None se o veiculo tiver sido removido apos a OS ser criada."
+     },
+     "itens": {
+      "items": {
+       "$ref": "#/components/schemas/ItemDaOrdemResponse"
+      },
+      "type": "array",
+      "title": "Itens"
+     },
+     "orcamento": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/OrcamentoResponse"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     },
+     "atualizado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Atualizado Em"
+     },
+     "situacao": {
+      "type": "string",
+      "title": "Situacao",
+      "description": "Situacao no vocabulario do challenge (RF-021), derivada de `status`: Recebida, Em diagnóstico, Aguardando aprovação, Em execução, Finalizada, Entregue ou Cancelada. A espera de aprovacao complementar apresenta o mesmo rotulo de Aguardando aprovação.",
+      "readOnly": true
+     }
+    },
+    "type": "object",
+    "required": [
+     "status",
+     "id",
+     "cliente_id",
+     "veiculo_id",
+     "itens",
+     "orcamento",
+     "criado_em",
+     "atualizado_em",
+     "situacao"
+    ],
+    "title": "OrdemDeServicoResponse",
+    "description": "Projecao completa de uma ordem (retorno padrao dos endpoints de mutacao).\n\n``cliente_nome`` e ``veiculo_placa`` sao resolvidos server-side via\n``EnriquecerOrdemDeServico`` e podem ficar ``None`` se o cliente\nou o veiculo tiverem sido removidos depois da OS ser criada."
+   },
+   "OrdemListaResponse": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/OrdemResumoResponse"
+      },
+      "type": "array",
+      "title": "Items"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total",
+      "description": "Total de ordens no universo listado (acompanha o filtro incluir_encerradas, RF-023)."
+     },
+     "offset": {
+      "type": "integer",
+      "title": "Offset",
+      "description": "Offset da pagina atual (>= 0)."
+     },
+     "limit": {
+      "type": "integer",
+      "title": "Limit",
+      "description": "Tamanho da pagina atual (1..100)."
+     }
+    },
+    "type": "object",
+    "required": [
+     "items",
+     "total",
+     "offset",
+     "limit"
+    ],
+    "title": "OrdemListaResponse",
+    "description": "Pagina de ``OrdemResumoResponse`` + metadata de paginacao."
+   },
+   "OrdemResumoResponse": {
+    "properties": {
+     "status": {
+      "type": "string",
+      "title": "Status"
+     },
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "cliente_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Cliente Id"
+     },
+     "cliente_nome": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nome",
+      "description": "Nome do cliente, resolvido server-side em batch."
+     },
+     "veiculo_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Veiculo Id"
+     },
+     "veiculo_placa": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Veiculo Placa",
+      "description": "Placa do veiculo, resolvida server-side em batch."
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     },
+     "situacao": {
+      "type": "string",
+      "title": "Situacao",
+      "description": "Situacao no vocabulario do challenge (RF-021), derivada de `status`: Recebida, Em diagnóstico, Aguardando aprovação, Em execução, Finalizada, Entregue ou Cancelada. A espera de aprovacao complementar apresenta o mesmo rotulo de Aguardando aprovação.",
+      "readOnly": true
+     }
+    },
+    "type": "object",
+    "required": [
+     "status",
+     "id",
+     "cliente_id",
+     "veiculo_id",
+     "criado_em",
+     "situacao"
+    ],
+    "title": "OrdemResumoResponse",
+    "description": "Projecao enxuta para listagens paginadas."
+   },
+   "Papel": {
+    "type": "string",
+    "enum": [
+     "admin",
+     "mecanico",
+     "atendente"
+    ],
+    "title": "Papel"
+   },
+   "PecaDaOrdemRequest": {
+    "properties": {
+     "servico_catalogo_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Servico Catalogo Id",
+      "description": "Servico do catalogo que consome a peca."
+     },
+     "item_estoque_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Item Estoque Id",
+      "description": "Identificador do ItemEstoque consumido."
+     },
+     "quantidade": {
+      "type": "integer",
+      "exclusiveMinimum": 0.0,
+      "title": "Quantidade",
+      "description": "Quantidade em unidades (> 0)."
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "servico_catalogo_id",
+     "item_estoque_id",
+     "quantidade"
+    ],
+    "title": "PecaDaOrdemRequest",
+    "description": "Linha de peca no payload de criacao da OS (RF-020).\n\n``servico_catalogo_id`` e obrigatorio: no modelo de itens da ordem,\ntoda peca consumida e vinculada ao servico que a utiliza. O preco da\nlinha vem do estoque e a descricao do nome da peca."
+   },
+   "RefreshRequest": {
+    "properties": {
+     "refresh_token": {
+      "type": "string",
+      "title": "Refresh Token"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "refresh_token"
+    ],
+    "title": "RefreshRequest"
+   },
+   "RegistrarRequest": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+     },
+     "senha": {
+      "type": "string",
+      "maxLength": 128,
+      "minLength": 12,
+      "title": "Senha"
+     },
+     "papel": {
+      "$ref": "#/components/schemas/Papel"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "email",
+     "senha",
+     "papel"
+    ],
+    "title": "RegistrarRequest"
+   },
+   "ServicoDaOrdemRequest": {
+    "properties": {
+     "servico_catalogo_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Servico Catalogo Id",
+      "description": "Identificador do ServicoOferecido no contexto Catalogo."
+     },
+     "quantidade": {
+      "type": "integer",
+      "exclusiveMinimum": 0.0,
+      "title": "Quantidade",
+      "description": "Quantidade em unidades (> 0, default 1).",
+      "default": 1
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "servico_catalogo_id"
+    ],
+    "title": "ServicoDaOrdemRequest",
+    "description": "Linha de servico no payload de criacao da OS (RF-020).\n\nA descricao da linha e resolvida server-side a partir do nome do\nservico no catalogo; para descricao livre, use o endpoint\n``POST /{ordem_id}/itens`` apos a criacao."
+   },
+   "ServicoListaResponse": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/ServicoResponse"
+      },
+      "type": "array",
+      "title": "Items"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     },
+     "offset": {
+      "type": "integer",
+      "title": "Offset"
+     },
+     "limit": {
+      "type": "integer",
+      "title": "Limit"
+     }
+    },
+    "type": "object",
+    "required": [
+     "items",
+     "total",
+     "offset",
+     "limit"
+    ],
+    "title": "ServicoListaResponse"
+   },
+   "ServicoResponse": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "nome": {
+      "type": "string",
+      "title": "Nome"
+     },
+     "descricao": {
+      "type": "string",
+      "title": "Descricao"
+     },
+     "preco": {
+      "type": "string",
+      "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+      "title": "Preco"
+     },
+     "moeda": {
+      "type": "string",
+      "title": "Moeda"
+     },
+     "ativo": {
+      "type": "boolean",
+      "title": "Ativo"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "nome",
+     "descricao",
+     "preco",
+     "moeda",
+     "ativo"
+    ],
+    "title": "ServicoResponse"
+   },
+   "TokenResponse": {
+    "properties": {
+     "access_token": {
+      "type": "string",
+      "title": "Access Token"
+     },
+     "refresh_token": {
+      "type": "string",
+      "title": "Refresh Token"
+     },
+     "token_type": {
+      "type": "string",
+      "title": "Token Type"
+     }
+    },
+    "type": "object",
+    "required": [
+     "access_token",
+     "refresh_token",
+     "token_type"
+    ],
+    "title": "TokenResponse"
+   },
+   "UsuarioResponse": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "email": {
+      "type": "string",
+      "title": "Email"
+     },
+     "papel": {
+      "type": "string",
+      "title": "Papel"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "email",
+     "papel"
+    ],
+    "title": "UsuarioResponse"
+   },
+   "ValidationError": {
+    "properties": {
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Location"
+     },
+     "msg": {
+      "type": "string",
+      "title": "Message"
+     },
+     "type": {
+      "type": "string",
+      "title": "Error Type"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "ctx": {
+      "type": "object",
+      "title": "Context"
+     }
+    },
+    "type": "object",
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError"
+   },
+   "VeiculoResponse": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Id"
+     },
+     "placa": {
+      "type": "string",
+      "title": "Placa"
+     },
+     "marca": {
+      "type": "string",
+      "title": "Marca"
+     },
+     "modelo": {
+      "type": "string",
+      "title": "Modelo"
+     },
+     "ano": {
+      "type": "integer",
+      "title": "Ano"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "placa",
+     "marca",
+     "modelo",
+     "ano"
+    ],
+    "title": "VeiculoResponse",
+    "description": "Representacao JSON de um veiculo retornada pela API."
+   }
+  },
+  "securitySchemes": {
+   "HTTPBearer": {
+    "type": "http",
+    "scheme": "bearer"
+   }
+  }
+ }
+}
