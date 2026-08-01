@@ -10,8 +10,8 @@ on:
   pull_request:
     branches: [main]
     # O workflow mais caro (~20 min: stack compose + E2E + DAST) nao roda em PR
-    # so-docs. Espelha o paths-ignore de claude-code-review.yml. NAO aplicado
-    # ao gitleaks (security.yml), que precisa varrer .md (segredo vaza em doc).
+    # so-docs. NAO aplicado ao gitleaks (security.yml), que precisa varrer .md
+    # (segredo vaza em doc).
     paths-ignore:
       - "docs/**"
       - "**/*.md"
