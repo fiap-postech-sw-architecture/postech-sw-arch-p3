@@ -37,9 +37,12 @@ jobs:
     name: Claude reviews the PR
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Bots (dependabot) fora: a action rejeita ator nao-humano e o run fica
+    # vermelho; review de bump de dependencia nao vale credito de API.
     if: |
       github.event.pull_request.head.repo.full_name == github.repository
       && github.event.pull_request.draft == false
+      && github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
