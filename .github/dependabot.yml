@@ -21,6 +21,12 @@ updates:
       python-deps:
         patterns: ["*"]
         update-types: ["major", "minor", "patch"]
+    # Par otel pinado de proposito (SDK 1.42.x <-> instrumentation 0.63bx,
+    # ver extra `otel` no pyproject): bump exige mover o par junto, manual.
+    # Sem o ignore o Dependabot tenta, falha a resolucao e o run mensal
+    # "Dependabot Updates" fica vermelho.
+    ignore:
+      - dependency-name: "opentelemetry-*"
     labels:
       - "dependencies"
 
