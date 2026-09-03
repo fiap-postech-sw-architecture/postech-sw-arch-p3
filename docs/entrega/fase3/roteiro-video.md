@@ -75,22 +75,22 @@ curl -s -X POST "$(terraform output -raw auth_url_prod)" \
 
 ### 3. Execução da pipeline CI/CD (1min30s)
 
-**Caminho AWS/Actions** (se a cota tiver renovado): abrir **Actions → CI/CD** em um dos 4 repos e mostrar a run verde — jobs de gate (lint, typecheck, segurança, testes ≥ 95%) e deploy por branch (`homolog` → homologação, `main` → produção).
+**Caminho Actions** (padrão — pipelines executando desde 01/08/2026): abrir **Actions** em um dos 4 repos e mostrar a run verde — jobs de gate (lint, typecheck, segurança, testes ≥ 95%) e deploy por branch (`homolog` → homologação, `main` → produção).
 
-**Caminho local espelho** (estado atual — cota esgotada, [ADR-033](../../arquitetura/adr/fase3/033-cicd-multi-repo.md)): mostrar os workflows commitados (`.github/workflows/ci.yml` e `cd.yml` nos 4 repos) e rodar o gate espelho ao vivo no repo lambda (o mais rápido):
+**Caminho local espelho** (complemento opcional, [ADR-033](../../arquitetura/adr/fase3/033-cicd-multi-repo.md)): mostrar os workflows commitados (`.github/workflows/ci.yml` e `cd.yml` nos 4 repos) e rodar o gate espelho ao vivo no repo lambda (o mais rápido):
 
 ```bash
 # repo postech-sw-arch-p3-lambda:
 make gate     # lint + mypy strict + bandit + 34 testes (cobertura 100%) + terraform validate
 ```
 
-**Fala**: "Cada repositório tem CI e CD próprios com deploy automático por branch; com a cota do Actions esgotada, o gate local é o espelho obrigatório dos mesmos passos — no app são 1.834 testes com 96,4% de cobertura."
+**Fala**: "Cada repositório tem CI e CD próprios com deploy automático por branch, e a main é protegida: só entra por PR com os checks verdes. O gate local espelha os mesmos passos — no app são 1.834 testes com 96,4% de cobertura."
 
 **Evidência no ar**: workflows nos 4 repos OU run verde; `make gate` terminando verde com cobertura 100%.
 
 ### 4. Deploy automatizado (1min30s)
 
-> Este bloco precisa de UMA das duas evidências de automação: run verde do `cd.yml` disparado por push (cota do Actions renovada — Desbloqueio 2) ou deploy na AWS via pipeline (Desbloqueio 1). O `make cd-local` abaixo é o fallback narrado ("espelho local do que o pipeline executa") — deixe explícito na fala que o gatilho real é o push.
+> Este bloco precisa de UMA das duas evidências de automação: run verde do `cd.yml` disparado por push (já existe: CD de 01/08/2026 em `main` e `homolog`, deploy no kind do runner) ou deploy na AWS via pipeline (Desbloqueio 1). O `make cd-local` abaixo é o fallback narrado ("espelho local do que o pipeline executa") — deixe explícito na fala que o gatilho real é o push.
 
 **Caminho local** (mesmos estágios do job `deploy` do `cd.yml` — paridade local × pipeline):
 

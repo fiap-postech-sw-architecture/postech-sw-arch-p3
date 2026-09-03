@@ -119,4 +119,12 @@ A ordem passa a ser **`infra-db` → `infra-k8s` → `app` (p3) → `lambda`/gat
 
 Os segredos de runtime (`JWT_SECRET`, `ENCRYPTION_KEY`, `ADMIN_PASSWORD`, `DATABASE_URL`) fluem por **GitHub Secrets** → `TF_VAR_*` (repos Terraform) ou `kubectl create secret` (deploy no EKS) nos pipelines; no fluxo manual, `terraform.tfvars`/arquivos de env locais git-ignored. AWS Secrets Manager e SSM Parameter Store foram descartados pelas restrições de IAM/KMS do Learner Lab ([ADR-026](026-cloud-alvo-aws-academy.md)).
 
+### (e) Repositórios públicos e branch protection ativa (2026-09-03)
+
+Os cinco repositórios da fase 3 (`p3`, `p3-lambda`, `p3-infra-k8s`, `p3-infra-db`, `p3-docs`) tornaram-se **públicos** em 03/09/2026 — a segunda opção registrada em (a), decidida pelo grupo (precedente: o `p2` já era público). Antes da mudança, o gitleaks rodou sobre o histórico completo dos cinco; os únicos achados são segredos de demonstração já públicos desde a fase 2. Consequências:
+
+* A **branch protection da `main`** passou a ser viável no plano free e foi ativada nos cinco repositórios: PR obrigatório (sem commit direto, administradores incluídos), zero aprovações exigidas (o grupo revisa por convenção), checks obrigatórios onde existem (`p3`: jobs de `ci.yml`, `security.yml` e `full-test-ci.yml`; `p3-lambda`: `gate` e `tf-validate`; repos de infra: `gate`). A `homolog` fica livre para o deploy por push.
+* Minutos ilimitados do Actions em repositório público — o risco 5 da RFC-003 (cota) deixa de existir. A cota já havia renovado em 01/08/2026, quando os pipelines dos quatro repos rodaram verdes pela primeira vez (Desbloqueio 2).
+* A convenção de PR de (a) continua como prática, agora reforçada pela proteção técnica.
+
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

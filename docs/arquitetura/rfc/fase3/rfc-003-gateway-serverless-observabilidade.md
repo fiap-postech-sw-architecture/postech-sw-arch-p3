@@ -200,7 +200,7 @@ Paridade cloud × local, componente a componente:
 | Banco | RDS PostgreSQL 16 | PostgreSQL 16 em Docker/kind | **Sim** — mesmo engine, mesma versão, mesmas migrações |
 | Monitoramento | Prometheus/Grafana/Loki/Jaeger no EKS | a mesma stack no kind | **Sim** — manifests idênticos ([ADR-032](../../adr/fase3/032-monitoramento-grafana-loki.md)) |
 | Relay + outbox + Mailpit + Redis | no EKS | no kind/compose | **Sim** — herança da fase 2 |
-| CI/CD | GitHub Actions (4 repos) | gate local espelho (`make check` / `make gate`) | **Parcial e temporária** — obrigatória enquanto a cota do Actions estiver esgotada ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)) |
+| CI/CD | GitHub Actions (4 repos) | gate local espelho (`make check` / `make gate`) | **Complementar** — pré-check antes do push; o CI é o gate canônico desde 01/08/2026 ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)) |
 
 A consequência prática da paridade parcial do gateway: o trecho **gateway → app no EKS só é testável na AWS**, dentro de uma sessão do Learner Lab — risco assumido na seção 8.
 
@@ -389,7 +389,7 @@ O gatilho entre repos é manual (README/runbook) — quatro pipelines pequenos c
 
 **Secrets rotativos do Academy**: cada _Start Lab_ emite novo trio access key + secret + session token; o primeiro passo do runbook de sessão (`aws-academy-setup.md`, repo `postech-sw-arch-p3-docs`) é re-gravar os GitHub Secrets dos repos que tocam a AWS. OIDC/segredos de longa duração são inviáveis nesta conta; promover a OIDC quando houver conta AWS estável é evolução compatível.
 
-**Cota do GitHub Actions esgotada**: enquanto não renovar, os pipelines ficam commitados e corretos, porém não executáveis; o **gate local espelho é obrigatório antes de cada push** — `make check` no app e alvo `make gate` equivalente nos demais repos (fmt/validate/tflint, `sam validate`, testes). Quando a cota renovar, o CI volta a ser o gate canônico sem mudança nos workflows.
+**Cota do GitHub Actions** (esgotada em julho/2026, renovada em 01/08/2026): enquanto os pipelines não executavam, ficaram commitados e corretos e o **gate local espelho** foi o freio — `make check` no app e alvo `make gate` equivalente nos demais repos (fmt/validate/tflint, `sam validate`, testes). O CI voltou a ser o gate canônico sem mudança nos workflows; o gate local segue como pré-check antes de cada push, e os repositórios públicos (03/09/2026) eliminam o limite de minutos.
 
 ## 7. Correlação de logs e traces
 
@@ -409,7 +409,7 @@ O requisito RNF-029 exige logs JSON com correlação entre requisições — e a
 | 2 | Credenciais de ~4h: pipeline que toca a AWS falha com credencial expirada; esquecer a rotação derruba o CD | [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md), [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | re-gravação dos secrets como primeiro passo do runbook de sessão; nenhum fluxo assume ambiente sempre-no-ar |
 | 3 | Paridade parcial do gateway: o trecho gateway → app no EKS não existe localmente — só testável na AWS | [ADR-027](../../adr/fase3/027-api-gateway-aws.md) | `sam local start-api` cobre a rota de autenticação; validação JWT redundante no app iguala a semântica de segurança; teste do roteamento completo planejado dentro da primeira sessão de validação |
 | 4 | EKS com `LabRole` fixa: IAM não-idiomático (sem roles mínimas por recurso), inaceitável em produção real | [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md), [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | restrição dura da conta, documentada como concessão; Terraform referencia a role por data source — trocar para roles próprias em conta real é mudança pontual |
-| 5 | Cota do GitHub Actions esgotada: "pipelines funcionais" (entregável) não demonstráveis até a renovação | [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | gate local espelho obrigatório; workflows prontos para o primeiro run verde; renovar a cota antes da gravação do vídeo |
+| 5 | Cota do GitHub Actions esgotada em julho/2026: "pipelines funcionais" (entregável) não demonstráveis até a renovação — **mitigado**: cota renovada em 01/08/2026 (runs verdes nos 4 repos) e repositórios públicos em 03/09/2026 (minutos ilimitados) | [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | gate local espelho como pré-check; runs verdes referenciados no documento de entrega |
 | 6 | Correlação quebrada na borda: o middleware original ignorava id externo; scrub de PII precisa continuar valendo | gap analysis §5 | **Mitigado (implementado)**: o middleware aceita o `X-Request-ID` do gateway quando válido, coberto por teste; seção 7 |
 | 7 | Deriva entre template SAM e Terraform da function (dois descritores) | [ADR-029](../../adr/fase3/029-emulacao-local-lambda.md) | fronteira de papéis explícita: mudança real sempre no Terraform; o template segue para manter a emulação fiel; `sam deploy` proibido |
 | 8 | Drift entre overlays kind × EKS | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | base `k8s/` única; overlay EKS restrito ao que de fato difere do kind (imagens via GHCR com `imagePullSecrets`, Service `LoadBalancer` na API, `DATABASE_URL` via Secret `postgres-credentials` apontando ao RDS); validação no kind a cada PR |
