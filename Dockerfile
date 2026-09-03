@@ -51,6 +51,14 @@ LABEL org.opencontainers.image.title="postech-sw-arch-p2 app" \
 # arquivos (/app) igual ao runAsUser, compativel com readOnlyRootFilesystem.
 RUN groupadd -r -g 1001 pytstop && useradd -r -u 1001 -g pytstop pytstop
 
+# Sem pip no runtime: o app roda so pelo venv do uv (/app/.venv) e nunca
+# instala nada em execucao. O pip da imagem base carrega pacotes vendorizados
+# (pip/_vendor/vendor.txt) que o trivy passou a auditar -- em 2026-08 a tag
+# movel python:3.14-slim trouxe o pip 26.2.1 com msgpack 1.1.2 e setuptools
+# 70.3.0 (HIGH, sem fix possivel por aqui) e o gate security.yml ficou
+# vermelho sem mudanca no repo. Remover o pip elimina a superficie inteira.
+RUN python -m pip uninstall -y pip
+
 WORKDIR /app
 
 # Copia o venv materializado pelo uv e o codigo da aplicacao.
