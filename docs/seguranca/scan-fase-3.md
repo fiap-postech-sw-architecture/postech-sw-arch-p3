@@ -2,7 +2,7 @@
 
 > [↑ Raiz do projeto](../../README.md) · [↑ Segurança](README.md)
 
-> **Versão**: 1.1 — atualiza a seção SonarQube com o fechamento dos 143 code smells (PR #6). Bateria executada em 11-12/07/2026 na árvore de trabalho da HEAD atual dos repositórios `p3` e `p3-lambda`. Princípio de evidência local primeiro: enquanto a cota do GitHub Actions da organização estiver esgotada, os scanners executáveis localmente rodam via gate espelho ([ADR-033](../arquitetura/adr/fase3/033-cicd-multi-repo.md)); trivy e gitleaks permanecem commitados nos workflows aguardando a cota. Sucede o [scan-fase-2.md](scan-fase-2.md), cuja baseline o snapshot da fase 3 herda.
+> **Versão**: 1.2 — registra trivy e gitleaks verdes no CI (03/09/2026) e a remoção do `pip` das imagens de runtime; a 1.1 atualizou a seção SonarQube com o fechamento dos 143 code smells (PR #6). Bateria executada em 11-12/07/2026 na árvore de trabalho da HEAD atual dos repositórios `p3` e `p3-lambda`, via gate espelho ([ADR-033](../arquitetura/adr/fase3/033-cicd-multi-repo.md)); trivy e gitleaks rodam no CI desde a renovação da cota do Actions (01/08/2026). Sucede o [scan-fase-2.md](scan-fase-2.md), cuja baseline o snapshot da fase 3 herda.
 
 ## Escopo
 
@@ -14,7 +14,7 @@ Bateria da fase 3 sobre as camadas do pipeline de segurança ([ADR-011](../arqui
 - SAST semântico (CodeQL, suíte de qualidade local via `make codeql-quality`);
 - SonarQube como scan manual de fechamento (não é gate de CI por decisão, TD-010/[ADR-011](../arquitetura/adr/011-pipeline-seguranca-analise-estatica.md));
 - SBOM CycloneDX gerado e validado (`make sbom`, TD-012/ADR-012);
-- SCA de imagem (trivy) e detecção de segredos (gitleaks): commitados no CI, pendentes da cota do Actions.
+- SCA de imagem (trivy) e detecção de segredos (gitleaks): no CI (`security.yml`), a cada push, em cada PR e no cron semanal.
 
 ## Resumo
 
@@ -27,7 +27,7 @@ Bateria da fase 3 sobre as camadas do pipeline de segurança ([ADR-011](../arqui
 | CodeQL (suíte de qualidade) | SAST semântico | código Python (`make codeql-quality`) | **0 findings ativos** |
 | SonarQube (Community, local) | Análise estática + hotspots | `src/` + coverage importado | **Quality Gate Passed** — 0 bugs, 0 vulnerabilities, 0 hotspots, 0 code smells (143 zerados no PR #6), ratings A/A/A; 94,6% no denominador do Sonar (gate real 96,8%) |
 | SBOM (CycloneDX, `make sbom`) | Inventário de dependências | deps de runtime do `uv.lock` | **Gerado e validado** — 48 refs |
-| trivy · gitleaks | SCA (imagem) / segredos | imagem Docker, árvore git | **Pendentes da cota do Actions** — commitados no CI; última execução verde em [scan-fase-2.md](scan-fase-2.md) |
+| trivy · gitleaks | SCA (imagem) / segredos | imagem Docker, árvore git | **Verdes no CI em 03/09/2026** — trivy 0 HIGH/CRITICAL, gitleaks 0 achados (seção "trivy e gitleaks") |
 
 ## Análise Estática (bandit)
 
@@ -66,9 +66,9 @@ Verificação: `make check` verde (ruff + lint-arch + mypy strict + bandit), su�
 
 `make sbom` gera e valida o `sbom.cdx.json` a partir das dependências de runtime do lockfile: 48 refs de componentes inventariados.
 
-## Pendentes (trivy · gitleaks)
+## trivy e gitleaks (CI)
 
-Os gates de trivy (imagem) e gitleaks (segredos) estão commitados nos workflows e aguardam a renovação da cota do GitHub Actions da organização; não há executor local equivalente configurado para esta bateria. Última execução verde registrada no [scan-fase-2.md](scan-fase-2.md), herdada pelo snapshot.
+Os dois gates rodam no [`security.yml`](../../.github/workflows/security.yml) desde a renovação da cota do Actions (01/08/2026). Em 10/08/2026 o cron semanal ficou vermelho sem mudança no repositório: a tag móvel `python:3.14-slim` passou a trazer o pip 26.2.1, cujo `pip/_vendor/vendor.txt` lista `msgpack 1.1.2` e `setuptools 70.3.0` (HIGH, sem correspondente no `uv.lock`); o pip-audit acusava `cryptography 49.0.0`. Correção no [PR #14](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/pull/14): remoção do `pip` das imagens de runtime do app e da UI (ambas rodam só pelo venv do uv) e `cryptography` 50.0.1. Resultado: trivy **0 HIGH/CRITICAL** e gitleaks **0 achados** ([run Security](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/actions/runs/33763698992)). Antes de tornar os cinco repositórios públicos (03/09/2026), o gitleaks 8.30 rodou localmente sobre o histórico completo de cada um: os únicos achados são os segredos de demonstração já públicos desde a fase 2 (`k8s/secret.yaml`, `env.json.example` da lambda e o `JWT_SECRET` fixo da fixture de integração).
 
 ## Relação com Outros Documentos
 

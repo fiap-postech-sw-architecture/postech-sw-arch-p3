@@ -131,8 +131,8 @@ rebuilda imagens, aguarda o backend ficar saudável (healthcheck em
 local.** Para subir sem reset: `make up`. Derrubar tudo: `make down`. Após
 `git pull`, prefira `make rebuild`.
 
-Antes de cada push, rode o gate local espelho da CI (obrigatório enquanto a
-cota do Actions estiver esgotada — [ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)):
+Antes de cada push, rode o gate local espelho da CI (pré-check obrigatório do
+fluxo canônico — [ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)):
 
 ```bash
 make check    # lint + lint-arch + typecheck + security + testes (gate de 95%)
@@ -215,9 +215,9 @@ Padrão da fase 3 ([ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md))
 | [`cd.yml`](.github/workflows/cd.yml) | push em `main`/`homolog` + `workflow_dispatch` | build e push das imagens no GHCR (tag por SHA) → deploy em cluster kind efêmero no runner (validação sem custo) **e**, com os secrets AWS presentes, deploy no EKS via overlay `k8s/overlays/eks` no ambiente da branch (`homologacao`/`producao`) |
 | [`full-test-ci.yml`](.github/workflows/full-test-ci.yml) | PRs + nightly | E2E concorrente contra a stack compose completa (journeys + matriz RBAC + DAST OWASP ZAP) |
 
-Atualização de dependências automatizada por [Dependabot](.github/dependabot.yml) (uv, github-actions, docker), semanal.
+Atualização de dependências automatizada por [Dependabot](.github/dependabot.yml) (uv, github-actions, docker), mensal e agrupada por ecossistema.
 
-> ⚠️ **Cota do GitHub Actions esgotada** (gap analysis §5): os pipelines estão commitados e corretos, mas não executáveis até a renovação da cota. O gate local espelho é obrigatório antes de cada push: `make check` (CI) e `make cd-local` (CD). Quando a cota renovar, o CI volta a ser o gate canônico sem mudança nos workflows.
+> Pipelines em execução no GitHub Actions desde 01/08/2026 (a cota esgotada em julho renovou; o repositório é público desde 03/09/2026, com minutos ilimitados). A `main` é protegida: PR obrigatório, checks de CI e Security obrigatórios ([ADR-033, Adendo (e)](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)). O gate local espelho (`make check` e `make cd-local`) continua como pré-check antes de cada push.
 
 ## API
 
@@ -241,9 +241,9 @@ Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose
 | Documentação de arquitetura (ADRs 026–033, RFC-003, gap analysis) | ✅ completa |
 | Manifests k8s + stack de monitoramento no kind | ✅ no ar localmente (`make cd-local`) |
 | Overlay EKS + pipeline homolog/produção | ✅ commitados ([`k8s/overlays/eks/`](k8s/overlays/eks/kustomization.yaml), [`cd.yml`](.github/workflows/cd.yml)) |
-| Execução dos pipelines no GitHub Actions | ⏳ aguardando renovação da **cota do Actions** (gate local espelho em vigor) |
+| Execução dos pipelines no GitHub Actions | ✅ runs verdes desde 01/08/2026 (CI, Security, CD `main`/`homolog`, full-test); `main` protegida desde 03/09/2026 |
 | Provisionamento EKS/RDS/gateway na AWS | ⏳ aguardando **credenciais AWS Academy** (sessões do Learner Lab; runbook no p3-docs) |
-| Vídeo de demonstração e PDF da entrega | 📅 planejados para a fase 5 do cronograma interno |
+| Vídeo de demonstração e PDF da entrega | ⏳ pendentes — passo a passo na issue de fechamento da fase 3 ([#16](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/issues/16)) |
 
 - Links de deploys ativos: **n/a permanente** — os ambientes AWS Academy são efêmeros por design (`terraform destroy` pós-demo, [ADR-026](docs/arquitetura/adr/fase3/026-cloud-alvo-aws-academy.md)); o repo documenta como subir o ambiente em minutos, e o PDF de submissão registra essa justificativa.
 
