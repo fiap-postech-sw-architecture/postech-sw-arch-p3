@@ -122,7 +122,7 @@ Pre-requisitos: `pandoc`, `weasyprint`, `npx` (mermaid-cli on-demand), `python3`
 
 ## Parte C — Checklist de submissao (os 3 itens do enunciado)
 
-- [ ] Repo **privado** compartilhado com `soat-architecture` (acao outward-facing — confirme com o usuario; `gh api -X PUT repos/OWNER/REPO/collaborators/soat-architecture -f permission=pull`).
+- [ ] Repo **publico** (desde 2026 a FIAP corrige de forma automatizada e exige repositorio publico): antes de abrir, `gitleaks git -c .gitleaks.toml <repo>` no historico completo de CADA repo; depois `gh repo edit OWNER/REPO --visibility public --accept-visibility-change-consequences`. `soat-architecture` como colaborador de leitura continua exigido pelo enunciado (acao outward-facing — confirme com o usuario; `gh api -X PUT repos/OWNER/REPO/collaborators/soat-architecture -f permission=pull`).
 - [ ] **Desenho da arquitetura** no documento (Mermaid renderizado no PDF).
 - [ ] **Link do video** (YouTube/Vimeo, ate 15min, publico ou nao listado) preenchido nos marcadores e no PDF.
 - [ ] Rastreabilidade: todo requisito do enunciado mapeado a RF/RNF/RN → PR → evidencia (ver `references/formula-nota-10.md`).
