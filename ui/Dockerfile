@@ -29,6 +29,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /usr/local/bin/uv
 # nao precisa (nem deve) rodar como root.
 RUN groupadd -r -g 1001 pytstop && useradd -r -u 1001 -g pytstop pytstop
 
+# Sem pip no runtime, mesmo motivo do Dockerfile do app: a UI roda pelo venv
+# do uv e o pip da imagem base traz vendorizados com CVE que o trivy audita.
+RUN python -m pip uninstall -y pip
+
 WORKDIR /app
 # O NiceGUI cria `.nicegui/` (storage) no CWD em runtime: o DIRETORIO /app
 # precisa ser gravavel pelo nao-root. Os arquivos copiados abaixo continuam
