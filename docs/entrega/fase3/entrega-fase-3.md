@@ -31,7 +31,7 @@ Os repositórios são a fonte de verdade. A fase 3 segrega a solução em quatro
 
 ## 2. Links dos repositórios
 
-Repositórios **públicos** no GitHub (organização `fiap-postech-sw-architecture`) desde 03/09/2026 — decisão do grupo registrada no Adendo (e) do [ADR-033](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/arquitetura/adr/fase3/033-cicd-multi-repo.md): a visibilidade pública liberou a proteção técnica da `main` exigida pelo enunciado e os minutos ilimitados do Actions. O usuário `soat-architecture` é adicionado como colaborador de leitura em todos os repositórios, como o enunciado pede (pendência 2, seção 9). São os quatro repositórios exigidos pelo enunciado, mais um quinto de processo:
+Repositórios **públicos** no GitHub (organização `fiap-postech-sw-architecture`) desde 03/09/2026, por orientação da FIAP: a correção automatizada do Tech Challenge exige repositórios públicos (Adendo (e) do [ADR-033](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)). A visibilidade pública também liberou a proteção técnica da `main` exigida pelo enunciado e os minutos ilimitados do Actions. O usuário `soat-architecture` é adicionado como colaborador de leitura em todos os repositórios, como o enunciado pede (pendência 2, seção 9). São os quatro repositórios exigidos pelo enunciado, mais um quinto de processo:
 
 | Repositório | Papel na fase 3 | URL |
 |---|---|---|

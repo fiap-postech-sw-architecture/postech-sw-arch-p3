@@ -94,3 +94,32 @@ retrabalho. Formato: **sintoma → causa → o que fazer de cara**.
     o usuário; não convide sozinho.
 29. **Os 3 itens do PDF** (link do repo compartilhado, diagrama, link do vídeo)
     são exigência do enunciado — o PDF sem o vídeo preenchido é inútil.
+
+## Visibilidade, proteção e CI (aprendidos na fase 3)
+
+30. **Repos PÚBLICOS são exigência da FIAP** (correção automatizada, desde 2026):
+    `gh repo edit OWNER/REPO --visibility public --accept-visibility-change-consequences`.
+    ANTES: `gitleaks git -c .gitleaks.toml <repo>` no histórico completo (público
+    expõe tudo); só segredos de demo marcados `gitleaks:allow` podem existir.
+    Bônus: Actions ilimitado (fim de cota/billing) e branch protection grátis.
+31. **Branch protection só existe em repo público na org free**: `PUT
+    repos/OWNER/REPO/branches/main/protection` com
+    `required_pull_request_reviews.required_approving_review_count=0`,
+    `enforce_admins=true` e checks obrigatórios com os nomes EXATOS dos jobs.
+    NUNCA exigir check de workflow com `paths-ignore` (ex.: full-test ignora
+    docs) — PR só-docs fica "Expected" para sempre.
+32. **Tag móvel da imagem base avermelha o Security sem commit**:
+    `python:3.14-slim` trocou o pip (26.2.1) e o trivy passou a acusar
+    msgpack/setuptools vendorizados em `pip/_vendor/vendor.txt` (aparecem sem
+    path no relatório). Achado que não existe no `uv.lock` = pip da base. Fix:
+    `RUN python -m pip uninstall -y pip` no runtime (app roda pelo venv do uv).
+    Reproduzir: colima + `docker build` + `trivy image -f json` (`PkgPath` null
+    = vendorizado).
+33. **Dependabot recusa rebasear PR agrupado** quando um pacote do grupo já foi
+    bumpado por outro PR ("updatable in another way") e só recria no próximo
+    ciclo. Saída: `uv lock --upgrade-package <pkg>...` com a mesma lista,
+    `make check`, PR próprio, fechar o do bot com o link. Confira se os labels
+    do `dependabot.yml` existem no repo (senão o bot avisa em todo PR).
+34. **rtk filtra/trunca a saída de `make`/`docker`** e `cmd | tail` mascara o
+    exit code: para evidência de gate use `rtk proxy make test > log; echo $?`
+    e leia o log.
