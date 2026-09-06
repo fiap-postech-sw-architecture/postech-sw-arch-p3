@@ -13,6 +13,7 @@ from src.autenticacao.infraestrutura.jwt_service import JWTService
 from src.autenticacao.interfaces.middleware import (
     _PERMISSOES,
     exigir_papel,
+    obter_cliente_id_atual,
     obter_usuario_atual,
 )
 
@@ -236,6 +237,21 @@ class TestEdgeCasesExigirPapel:
     def test_exigir_papel_com_valor_fora_do_enum_levanta_value_error(self) -> None:
         with pytest.raises(ValueError, match="papel invalido"):
             exigir_papel("admin", "desconhecido")
+
+
+class TestObterClienteIdAtual:
+    def test_converte_sub_em_uuid(self) -> None:
+        cliente_id = uuid4()
+        assert (
+            obter_cliente_id_atual({"sub": str(cliente_id), "papel": "cliente"})
+            == cliente_id
+        )
+
+    @pytest.mark.parametrize("sub", [None, "", "nao-e-uuid", 42])
+    def test_sub_invalido_retorna_401(self, sub: object) -> None:
+        with pytest.raises(HTTPException) as exc:
+            obter_cliente_id_atual({"sub": sub, "papel": "cliente"})
+        assert exc.value.status_code == 401
 
 
 class TestGuardasDePermissoes:

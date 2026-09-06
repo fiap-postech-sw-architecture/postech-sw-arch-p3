@@ -152,11 +152,13 @@ def criar_app() -> FastAPI:
     from src.cliente_veiculo.interfaces.router import router as cliente_router
     from src.estoque.interfaces.router import router as estoque_router
     from src.ordem_servico.interfaces.router import router as os_router
+    from src.ordem_servico.interfaces.router_cliente import router as os_cliente_router
 
     application.include_router(cliente_router)
     application.include_router(catalogo_router)
     application.include_router(estoque_router)
     application.include_router(os_router)
+    application.include_router(os_cliente_router)
     application.include_router(auth_router)
 
     # Middleware execution order (Starlette "last added runs first" on request,
