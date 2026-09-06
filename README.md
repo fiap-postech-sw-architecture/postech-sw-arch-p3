@@ -229,6 +229,7 @@ Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose
 | Serviços | /api/v1/servicos | CRUD catálogo |
 | Estoque | /api/v1/estoque | CRUD + ajuste de quantidade |
 | Ordens de Serviço | /api/v1/ordens-de-servico | Criação com serviços e peças, listagem ordenada por prioridade, ciclo completo da OS |
+| Ordens do Cliente | /api/v1/minhas-ordens | Lista e consulta somente as ordens do cliente autenticado pela Lambda |
 | Autenticação | /api/v1/autenticacao | Login interno, registro, refresh, logout (a autenticação de **clientes por CPF** entra pela borda serverless — [ADR-028](docs/arquitetura/adr/fase3/028-autenticacao-serverless-cpf.md)) |
 | Público | /api/v1/acompanhamento · /api/v1/publico/.../decisao-orcamento | Acompanhamento por placa + documento e decisão externa de orçamento via assinatura HMAC |
 | Admin / Outbox | /api/v1/admin/outbox | Operação da Transactional Outbox/DLQ, role `admin` |
