@@ -758,6 +758,32 @@ class ListarOrdens:
         return self._repo.contar(incluir_encerradas=incluir_encerradas)
 
 
+class ListarOrdensDoCliente:
+    def __init__(self, repo: OrdemDeServicoRepository) -> None:
+        self._repo = repo
+
+    def executar(
+        self,
+        cliente_id: UUID,
+        offset: int = 0,
+        limit: int = 20,
+        *,
+        incluir_encerradas: bool = False,
+    ) -> list[OrdemResumoDTO]:
+        ordens = self._repo.listar_por_cliente(
+            cliente_id,
+            offset=offset,
+            limit=limit,
+            incluir_encerradas=incluir_encerradas,
+        )
+        return [_ordem_resumo(ordem) for ordem in ordens]
+
+    def contar(self, cliente_id: UUID, *, incluir_encerradas: bool = False) -> int:
+        return self._repo.contar_por_cliente(
+            cliente_id, incluir_encerradas=incluir_encerradas
+        )
+
+
 class ObterOrdem:
     """Projecao completa de uma ordem por id."""
 
@@ -771,6 +797,17 @@ class ObterOrdem:
             OrdemNaoEncontradaException: ordem inexistente.
         """
         ordem = _obter_ordem(self._repo, ordem_id)
+        return _ordem_dto(ordem)
+
+
+class ObterOrdemDoCliente:
+    def __init__(self, repo: OrdemDeServicoRepository) -> None:
+        self._repo = repo
+
+    def executar(self, ordem_id: UUID, cliente_id: UUID) -> OrdemDeServicoDTO:
+        ordem = self._repo.obter_por_id_e_cliente(ordem_id, cliente_id)
+        if ordem is None:
+            raise OrdemNaoEncontradaException(ordem_id)
         return _ordem_dto(ordem)
 
 

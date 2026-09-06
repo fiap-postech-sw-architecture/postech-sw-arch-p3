@@ -32,8 +32,10 @@ from src.ordem_servico.aplicacao.use_cases import (
     GerarOrcamentoComplementar,
     IniciarDiagnostico,
     ListarOrdens,
+    ListarOrdensDoCliente,
     ObterMetricas,
     ObterOrdem,
+    ObterOrdemDoCliente,
     RegistrarEntrega,
     RejeitarOrcamentoComplementar,
     RemoverItem,
@@ -77,6 +79,14 @@ class FakeOrdemDeServicoRepository:
     def salvar(self, ordem: OrdemDeServico) -> None:
         self._ordens[ordem.id] = ordem
 
+    def obter_por_id_e_cliente(
+        self, ordem_id: UUID, cliente_id: UUID
+    ) -> OrdemDeServico | None:
+        ordem = self._ordens.get(ordem_id)
+        if ordem is None or ordem.cliente_id != cliente_id:
+            return None
+        return ordem
+
     def listar(
         self,
         offset: int = 0,
@@ -99,6 +109,34 @@ class FakeOrdemDeServicoRepository:
             1
             for ordem in self._ordens.values()
             if ordem.status.value not in _STATUS_ENCERRADOS
+        )
+
+    def listar_por_cliente(
+        self,
+        cliente_id: UUID,
+        offset: int = 0,
+        limit: int = 20,
+        *,
+        incluir_encerradas: bool = False,
+    ) -> list[OrdemDeServico]:
+        ordens = [
+            ordem
+            for ordem in self._ordens.values()
+            if ordem.cliente_id == cliente_id
+            and (incluir_encerradas or ordem.status.value not in _STATUS_ENCERRADOS)
+        ]
+        return ordens[offset : offset + limit]
+
+    def contar_por_cliente(
+        self, cliente_id: UUID, *, incluir_encerradas: bool = False
+    ) -> int:
+        return len(
+            self.listar_por_cliente(
+                cliente_id,
+                offset=0,
+                limit=len(self._ordens),
+                incluir_encerradas=incluir_encerradas,
+            )
         )
 
     def contar_por_status(self) -> dict[str, int]:
@@ -1016,6 +1054,41 @@ class TestObterOrdem:
         uc = ObterOrdem(repo=repo)
         with pytest.raises(OrdemNaoEncontradaException):
             uc.executar(uuid4())
+
+
+class TestListarOrdensDoCliente:
+    def test_lista_e_conta_somente_ordens_proprias(self) -> None:
+        repo = FakeOrdemDeServicoRepository()
+        cliente_id = uuid4()
+        propria = OrdemDeServico.criar(cliente_id=cliente_id, veiculo_id=uuid4())
+        alheia = OrdemDeServico.criar(cliente_id=uuid4(), veiculo_id=uuid4())
+        repo.salvar(propria)
+        repo.salvar(alheia)
+
+        uc = ListarOrdensDoCliente(repo)
+
+        assert [item.id for item in uc.executar(cliente_id)] == [propria.id]
+        assert uc.contar(cliente_id) == 1
+
+
+class TestObterOrdemDoCliente:
+    def test_retorna_ordem_propria(self) -> None:
+        repo = FakeOrdemDeServicoRepository()
+        cliente_id = uuid4()
+        ordem = OrdemDeServico.criar(cliente_id=cliente_id, veiculo_id=uuid4())
+        repo.salvar(ordem)
+
+        resultado = ObterOrdemDoCliente(repo).executar(ordem.id, cliente_id)
+
+        assert resultado.id == ordem.id
+
+    def test_ordem_alheia_e_tratada_como_inexistente(self) -> None:
+        repo = FakeOrdemDeServicoRepository()
+        ordem = OrdemDeServico.criar(cliente_id=uuid4(), veiculo_id=uuid4())
+        repo.salvar(ordem)
+
+        with pytest.raises(OrdemNaoEncontradaException):
+            ObterOrdemDoCliente(repo).executar(ordem.id, uuid4())
 
 
 class TestLockPessimistaNasTransicoes:
