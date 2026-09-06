@@ -157,6 +157,7 @@ class TestHierarquiaDePapeis:
             pytest.param("admin", "mecanico", id="admin-acessa-mecanico"),
             pytest.param("atendente", "atendente", id="atendente-acessa-atendente"),
             pytest.param("mecanico", "mecanico", id="mecanico-acessa-mecanico"),
+            pytest.param("cliente", "cliente", id="cliente-acessa-cliente"),
         ],
     )
     def test_papel_aceito(self, papel_usuario: str, papel_exigido: str) -> None:
@@ -171,6 +172,9 @@ class TestHierarquiaDePapeis:
             pytest.param("atendente", "mecanico", id="atendente-nega-mecanico"),
             pytest.param("mecanico", "admin", id="mecanico-nega-admin"),
             pytest.param("mecanico", "atendente", id="mecanico-nega-atendente"),
+            pytest.param("cliente", "admin", id="cliente-nega-admin"),
+            pytest.param("cliente", "atendente", id="cliente-nega-atendente"),
+            pytest.param("cliente", "mecanico", id="cliente-nega-mecanico"),
         ],
     )
     def test_papel_nao_herda_para_cima_ou_lateral(
@@ -179,6 +183,13 @@ class TestHierarquiaDePapeis:
         verificar = exigir_papel(papel_exigido)
         with pytest.raises(HTTPException) as exc:
             verificar({"papel": papel_usuario, "sub": "u1"})  # type: ignore[operator]
+        assert exc.value.status_code == 403
+
+    @pytest.mark.parametrize("papel", ["admin", "atendente", "mecanico"])
+    def test_papel_interno_nao_acessa_cliente(self, papel: str) -> None:
+        verificar = exigir_papel("cliente")
+        with pytest.raises(HTTPException) as exc:
+            verificar({"papel": papel, "sub": "u1"})
         assert exc.value.status_code == 403
 
 

@@ -1,6 +1,7 @@
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from src.autenticacao.dominio.papel import Papel
 
@@ -20,8 +21,15 @@ class RegistrarRequest(BaseModel):
     # `papel` e obrigatorio (issue #84): o endpoint e admin-gated, entao quem
     # registra escolhe explicitamente o papel. Omitir -> 422 (nunca um ADMIN
     # silencioso). Pydantic valida contra o enum Papel (StrEnum) — os valores
-    # aceitos no JSON sao os do enum em minusculo: "admin"/"mecanico"/"atendente".
-    papel: Papel
+    # aceitos no JSON sao os papeis internos em minusculo.
+    papel: Literal[Papel.ADMIN, Papel.MECANICO, Papel.ATENDENTE]
+
+    @field_validator("papel", mode="before")
+    @classmethod
+    def exigir_papel_interno(cls, papel: object) -> object:
+        if papel == Papel.CLIENTE:
+            raise ValueError("Clientes autenticam exclusivamente por CPF")
+        return papel
 
 
 class RefreshRequest(BaseModel):

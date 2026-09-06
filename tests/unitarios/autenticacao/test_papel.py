@@ -13,8 +13,11 @@ class TestPapel:
     def test_atendente_existe(self) -> None:
         assert Papel.ATENDENTE == "atendente"
 
+    def test_cliente_existe(self) -> None:
+        assert Papel.CLIENTE == "cliente"
+
     def test_total_de_papeis(self) -> None:
-        assert len(Papel) == 3
+        assert len(Papel) == 4
 
     def test_valores_sao_lowercase(self) -> None:
         for papel in Papel:

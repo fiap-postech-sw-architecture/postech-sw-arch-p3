@@ -570,10 +570,10 @@ class TestLoginRequestValidation:
 
 
 class TestRegistrarRequestValidation:
-    """RegistrarRequest exige email, senha (>=12), papel valido; rejeita extras.
+    """RegistrarRequest exige email, senha (>=12), papel interno; rejeita extras.
 
     Regressao do #84: papel e OBRIGATORIO (sem default ADMIN silencioso) e
-    validado contra o enum Papel (valores em minusculo: admin/mecanico/atendente).
+    limitado aos valores internos: admin/mecanico/atendente.
     """
 
     def test_rejects_password_too_short(self) -> None:
@@ -605,6 +605,24 @@ class TestRegistrarRequestValidation:
                 senha="password12chars",
                 papel="superuser",  # type: ignore[arg-type]
             )
+
+    def test_rejects_papel_cliente(self) -> None:
+        with pytest.raises(
+            ValidationError, match="Clientes autenticam exclusivamente por CPF"
+        ):
+            RegistrarRequest(
+                email="a@b.com",
+                senha="password12chars",
+                papel=Papel.CLIENTE,
+            )
+
+    def test_schema_anuncia_somente_papeis_internos(self) -> None:
+        schema = RegistrarRequest.model_json_schema()
+        assert set(schema["properties"]["papel"]["enum"]) == {
+            "admin",
+            "mecanico",
+            "atendente",
+        }
 
     @pytest.mark.parametrize("papel", [Papel.ADMIN, Papel.MECANICO, Papel.ATENDENTE])
     def test_accepts_cada_papel_valido(self, papel: Papel) -> None:

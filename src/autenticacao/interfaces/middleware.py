@@ -87,6 +87,7 @@ _PERMISSOES: MappingProxyType[Papel, frozenset[Papel]] = MappingProxyType(
         Papel.ADMIN: frozenset({Papel.ADMIN, Papel.ATENDENTE, Papel.MECANICO}),
         Papel.ATENDENTE: frozenset({Papel.ATENDENTE}),
         Papel.MECANICO: frozenset({Papel.MECANICO}),
+        Papel.CLIENTE: frozenset({Papel.CLIENTE}),
     }
 )
 
