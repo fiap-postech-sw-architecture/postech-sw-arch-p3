@@ -82,6 +82,9 @@ Lambda. Não haverá dependência entre states Terraform dos repositórios.
 
 O repositório `postech-sw-arch-p3` adicionará `cliente` ao enum de papéis sem
 conceder a ele permissões internas. Somente as novas rotas exigirão esse papel.
+O endpoint interno `POST /api/v1/autenticacao/registrar` continuará aceitando
+somente `admin`, `atendente` e `mecanico`; tentar registrar `cliente` retornará
+`422`. Assim, a Lambda permanece como emissora exclusiva de tokens de clientes.
 
 As operações de persistência consultarão por `cliente_id` no banco. Uma ordem
 não será carregada sem filtro para ter sua propriedade comparada em memória.
@@ -147,6 +150,7 @@ O desenvolvimento seguirá os padrões e gates já existentes em cada repositór
 ### Aplicação
 
 - papel `cliente` reconhecido sem herdar permissões internas;
+- cadastro interno rejeita o papel `cliente`;
 - `sub` válido convertido para UUID;
 - `sub` ausente ou inválido rejeitado;
 - listagem contém somente ordens do cliente autenticado;
