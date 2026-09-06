@@ -37,6 +37,12 @@ class OrdemDeServicoRepository(Protocol):
         """Persiste a ordem (insert ou update conforme a identidade)."""
         pass
 
+    def obter_por_id_e_cliente(
+        self, ordem_id: UUID, cliente_id: UUID
+    ) -> OrdemDeServico | None:
+        """Retorna a ordem somente quando ela pertence ao cliente."""
+        pass
+
     def listar(
         self,
         offset: int = 0,
@@ -63,6 +69,23 @@ class OrdemDeServicoRepository(Protocol):
         paginacao consistente com ``listar``. O default ``True`` preserva a
         semantica historica de "total persistido" (ex.: metricas).
         """
+        pass
+
+    def listar_por_cliente(
+        self,
+        cliente_id: UUID,
+        offset: int = 0,
+        limit: int = 20,
+        *,
+        incluir_encerradas: bool = False,
+    ) -> list[OrdemDeServico]:
+        """Pagina somente ordens pertencentes ao cliente."""
+        pass
+
+    def contar_por_cliente(
+        self, cliente_id: UUID, *, incluir_encerradas: bool = False
+    ) -> int:
+        """Conta o mesmo universo filtrado da listagem do cliente."""
         pass
 
     def contar_por_status(self) -> dict[str, int]:
