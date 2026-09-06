@@ -2,7 +2,7 @@
 
 **Data:** 2026-09-06
 
-**Status:** aprovado para planejamento
+**Status:** aprovado para implementação
 
 **Referência:** `docs/requisitos/fase3/Phase3_Tech_Challenge.pdf`
 
@@ -25,6 +25,7 @@ quatro repositórios da entrega.
 - Expor listagem e detalhe das ordens pertencentes ao cliente autenticado.
 - Remover o profile AWS fixo dos três providers Terraform.
 - Manter a região fixa em `us-east-1`.
+- Compartilhar o state entre execução local e GitHub Actions por backend S3.
 - Validar localmente antes do primeiro provisionamento real.
 - Provisionar manualmente, com validação via AWS CLI após cada etapa.
 
@@ -62,6 +63,8 @@ VPC default. O acesso à porta 5432 continua limitado à própria VPC.
 O repositório `postech-sw-arch-p3-infra-k8s` mantém o EKS e o node group na VPC
 default. A aplicação é publicada por um `Service` do tipo `LoadBalancer`, cujo
 endereço será fornecido ao Terraform do Gateway após o deploy da aplicação.
+Como o Learner Lab nega `iam:GetRole`, o ARN da `LabRole` existente será
+montado com o account ID retornado por STS, sem consultar ou criar IAM.
 
 ### Lambda e API Gateway
 
@@ -69,6 +72,7 @@ O repositório `postech-sw-arch-p3-lambda` terá as seguintes responsabilidades:
 
 - anexar apenas a Lambda de autenticação às subnets da VPC default;
 - criar um security group com a saída necessária para o PostgreSQL;
+- montar o ARN da `LabRole` existente a partir do account ID, sem `iam:GetRole`;
 - manter o authorizer fora da VPC, pois ele apenas valida o JWT;
 - manter `POST /auth` integrado à Lambda de autenticação;
 - remover a rota provisória `GET /auth/exemplo-protegido`;
@@ -76,7 +80,28 @@ O repositório `postech-sw-arch-p3-lambda` terá as seguintes responsabilidades:
 - proteger as rotas de cliente com o Lambda authorizer.
 
 O endereço base da aplicação será uma variável obrigatória do Terraform da
-Lambda. Não haverá dependência entre states Terraform dos repositórios.
+Lambda. Não haverá leitura ou dependência entre states Terraform dos
+repositórios.
+
+### State Terraform
+
+Os três projetos Terraform usarão o bucket privado e versionado
+`pytstop-terraform-state-924563550535`, criado uma única vez pelo usuário em
+`us-east-1`. Cada repositório manterá um state independente:
+
+- RDS: `rds/terraform.tfstate`;
+- EKS: `eks/terraform.tfstate`;
+- Lambda e API Gateway: `lambda/terraform.tfstate`.
+
+O backend será declarado diretamente no código, pois o nome do bucket não é
+segredo e a conta da entrega já está definida. O state será criptografado com
+SSE-S3 e protegido por versionamento e bloqueio de acesso público no bucket.
+
+O Terraform mínimo passará a ser `1.10`, permitindo o lock nativo do S3 com
+`use_lockfile = true`. Não será criada tabela DynamoDB. Os workflows de CD de
+cada repositório também serão serializados para evitar duas operações sobre o
+mesmo state. O lock continua protegendo contra concorrência acidental entre uma
+execução local e o GitHub Actions.
 
 ### Aplicação
 
@@ -143,6 +168,17 @@ A resolução de credenciais seguirá a cadeia padrão do SDK da AWS:
 
 A região continuará declarada como `us-east-1` nos providers.
 
+O backend S3 também usará a cadeia padrão de credenciais. A restrição do
+Learner Lab que impede `s3:ListAllMyBuckets` não afeta o backend, que acessará o
+bucket conhecido pelo nome e pela chave exata. A capacidade de criar o bucket e
+de ler, gravar e remover o arquivo de lock será comprovada antes do primeiro
+`plan` real.
+
+O Learner Lab também nega `iam:GetRole`. Os Terraform de EKS e Lambda usarão
+`aws_caller_identity` para obter o account ID por STS e formar o ARN da
+`LabRole` já fornecida pelo laboratório. Nenhum recurso ou política IAM será
+criado.
+
 ## Estratégia de testes
 
 O desenvolvimento seguirá os padrões e gates já existentes em cada repositório.
@@ -165,6 +201,7 @@ O desenvolvimento seguirá os padrões e gates já existentes em cada repositór
 - suíte atual da Lambda permanece verde;
 - formatação e validação dos três projetos Terraform;
 - plans sem criação antes da revisão;
+- backend S3, criptografia e lock nativo configurados nos três states;
 - plan da Lambda confirma VPC somente na função de autenticação;
 - plan do Gateway confirma integração com o app e authorizer nas duas rotas.
 
@@ -183,17 +220,22 @@ Cada repositório alterado usará a branch:
 
 Os commits seguirão Conventional Commits, as convenções observadas nos
 históricos dos repositórios e o limite máximo de 100 caracteres no cabeçalho.
-As mudanças serão separadas por responsabilidade, sem commits abrangentes.
+Cada commit terá uma responsabilidade única.
 
 ## Implantação e validação
 
-A implantação manual seguirá esta ordem:
+A implantação seguirá esta ordem:
 
-1. RDS;
-2. EKS;
-3. aplicação no EKS;
-4. Lambda e API Gateway;
-5. teste ponta a ponta.
+1. criação manual e validação do bucket de state;
+2. RDS provisionado manualmente;
+3. EKS provisionado manualmente;
+4. aplicação implantada no EKS pelo pipeline da branch `homolog`;
+5. Lambda e API Gateway provisionados manualmente;
+6. teste ponta a ponta.
+
+O merge da aplicação em `homolog` publicará a imagem e executará o job de
+deploy no EKS. A promoção posterior de `homolog` para `main` será feita somente
+após a validação do ambiente e aprovação do usuário.
 
 Após cada etapa, a infraestrutura será validada por comandos somente leitura da
 AWS CLI. O assistente não executará `terraform apply`, criação, alteração ou
@@ -203,6 +245,8 @@ destruição na AWS sem autorização explícita do usuário.
 
 - Os gates locais dos quatro repositórios alterados estão verdes.
 - Nenhum provider Terraform exige `--profile` ou profile nomeado.
+- Local e GitHub Actions usam os mesmos três states remotos no S3.
+- O bucket de state é privado, versionado e criptografado, com lock nativo.
 - A Lambda de autenticação acessa o RDS privado na AWS.
 - O authorizer rejeita token ausente, inválido ou expirado.
 - O Gateway encaminha as duas rotas protegidas para o EKS.
