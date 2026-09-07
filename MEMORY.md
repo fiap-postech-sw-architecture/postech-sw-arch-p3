@@ -32,6 +32,9 @@ Updated by AI agents at task end per `postech-ai-helper/ai/canonical/task-end-re
 
 ## Gotchas
 
+- 2026-09-07 - Renovar/iniciar uma sessão do Learner Lab pode parar as EC2 existentes do managed node group; o EKS persiste e o Auto Scaling substitui os nodes, mas pods e targets do NLB ficam indisponíveis por alguns minutos. Antes do smoke, aguardar 2 nodes `Ready`, deployments `Available` e zero targets unhealthy
+- 2026-09-07 - Build local no Mac ARM publica imagem GHCR `linux/arm64`, incompatível com nodes EKS `x86_64`; publicação manual para o EKS deve usar `docker buildx build --platform linux/amd64 --push` e confirmar o manifesto com `docker buildx imagetools inspect`
+- 2026-09-07 - A policy `voc-cancel-cred` do Learner Lab nega leituras como `lambda:GetFunctionConfiguration` e `apigateway:GET /vpclinks` mesmo após permitir o Terraform criar os recursos; validar com `terraform plan` sem drift e smoke real pelo endpoint do Gateway
 - 2026-09-06 - AWS Academy tambem nega `iam:GetRole`; os Terraform de EKS/Lambda nao podem usar `data aws_iam_role` para a LabRole e devem formar `arn:aws:iam::<account_id>:role/LabRole` com o account ID obtido via STS, sem criar IAM
 - 2026-09-06 - AWS Academy nega `s3:ListAllMyBuckets` explicitamente mesmo com STS valido; validar o backend pelo nome conhecido (`head-bucket`/`get-bucket-*`) e nao usar `list-buckets` como pre-requisito
 - 2026-09-03 - Dependabot RECUSA rebasear PR agrupado quando um pacote do grupo ja foi bumpado por outro PR (no #13 respondeu 'Looks like these dependencies are updatable in another way, so this is no longer needed' depois que o #14 subiu o cryptography) e so recria no proximo ciclo mensal. Saida: reproduzir os bumps com `uv lock --upgrade-package <pkg>` (mesma lista do PR do bot), `make check`, PR proprio, fechar o do bot com o link. Correlato: os labels `dependencies`/`ci` que o dependabot.yml pede nao existiam no repo (o bot avisava em todo PR) — criados em 2026-09-03.
