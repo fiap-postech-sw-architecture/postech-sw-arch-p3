@@ -85,7 +85,7 @@ Adotar **duas camadas de execução local**, com papéis distintos:
 
 - [ADR-028](028-autenticacao-serverless-cpf.md): a function cujos testes e emulação este ADR define
 - [ADR-027](027-api-gateway-aws.md): `sam local start-api` é a emulação local do gateway daquele ADR para a rota de autenticação
-- [ADR-026](026-cloud-alvo-aws-academy.md): o provisionamento real via Terraform (state local, LabRole, destroy pós-demo) do qual o template SAM é deliberadamente apartado
+- [ADR-026](026-cloud-alvo-aws-academy.md): o provisionamento real via Terraform (state S3, LabRole e controle de custo) do qual o template SAM é deliberadamente apartado
 - [ADR-005](../005-estrategia-testes.md): a estratégia de testes do projeto (pirâmide, testcontainers) que a camada pytest da Lambda estende
 
 ## Notas
@@ -102,5 +102,16 @@ Três fatos surgiram depois da decisão, na super-revisão da fase:
 3. **Empacotamento em dois alvos e parâmetros de emulação no template** (execução de 2026-07-11): o empacotamento foi separado em `make build` (SEMPRE `x86_64-manylinux2014`, o runtime real provisionado pelo Terraform; `docopt`, dep transitiva sdist-only, instalado em etapa própria por colidir com `--only-binary :all:`) e `make build-local` (arquitetura NATIVA do host, diretório `build/lambda-local`, o `CodeUri` do template): sob qemu (x86 emulado em Mac ARM) o runtime emulado crasha intermitentemente, e o `psycopg` aarch64 só publica wheel `manylinux_2_28`. Diretórios separados garantem que o zip do Terraform nunca saia com arquitetura errada. Pelo mesmo motivo, `Timeout: 30` e `Architectures` no `template.yaml` são parâmetros SÓ de emulação (cold start sob emulação é lento; arch segue o host); a configuração de produção é a do Terraform: timeouts 10s (auth) / 5s (authorizer) e `x86_64`.
 
 Lição de processo registrada no MEMORY: instrução executável documentada precisa de execução comprovada ao menos uma vez — "SAM não instalado" ficou como nota de rodapé do bootstrap e nenhuma revisão a promoveu a ação.
+
+## Adendo (2026-09-07) — fronteira atual da emulação
+
+A rota protegida de exemplo foi removida do `template.yaml` após as rotas reais
+de cliente serem implementadas no Terraform. O SAM volta a emular apenas
+`POST /auth`; a lógica do authorizer permanece coberta diretamente por pytest.
+
+O VPC Link, o NLB interno e o roteamento até o EKS são recursos exclusivos do
+ambiente AWS. Este adendo substitui somente a declaração do item 1 do adendo
+anterior sobre a rota protegida no template; a constatação de que o SAM suporta
+authorizer e as evidências históricas daquela execução permanecem válidas.
 
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

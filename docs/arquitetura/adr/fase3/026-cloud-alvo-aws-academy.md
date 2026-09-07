@@ -82,6 +82,27 @@ A conta AWS Academy **ainda não foi ativada** no momento desta decisão — o c
 * A conta ainda não foi ativada: até lá, todo o desenvolvimento e a validação acontecem localmente ([ADR-029](029-emulacao-local-lambda.md)); esta decisão destrava o desenho dos repos de infra sem esperar o convite
 * A distribuição dos módulos Terraform entre os repos é detalhada nos ADRs de infra: EKS no `p3-infra-k8s` ([ADR-030](030-cluster-kubernetes-eks.md)), RDS no `p3-infra-db` ([ADR-031](031-banco-gerenciado-rds.md)) e API Gateway + functions no próprio `p3-lambda` ([ADR-027](027-api-gateway-aws.md)) — este ADR fixa o provedor e as restrições de conta
 
+## Adendo (2026-09-07) — state remoto e janela de uso da AWS
+
+A ativação do Learner Lab e a validação da conta substituem três premissas
+operacionais da decisão original:
+
+- os Terraform usam states independentes no bucket S3 privado e versionado
+  `pytstop-terraform-state-924563550535`, com lock nativo e sem DynamoDB;
+- o ARN da `LabRole` é formado com o account ID retornado por STS, pois o
+  Learner Lab nega `iam:GetRole`;
+- os recursos podem permanecer durante a janela de preparação e gravação, de
+  no máximo sete dias, desde que cada sessão termine com o menor custo possível;
+- EKS, NLB e VPC Link não podem ser pausados sem cobrança e devem ser destruídos
+  ao final da gravação; o RDS pode ser parado temporariamente ou destruído.
+
+A rede continua na VPC default e sem NAT Gateway. Duas subnets privadas `/24`,
+sem rota default, hospedam apenas o NLB interno e as interfaces do VPC Link. A
+mudança não cria uma nova VPC nem altera as subnets públicas usadas pelo EKS.
+
+Este adendo substitui as afirmações de state local e de destruição obrigatória
+após toda sessão, preservando a restrição de custo e a proibição de criar IAM.
+
 ## Decisões Relacionadas
 
 - [ADR-025](../fase2/025-ambiente-cloud-demonstracao.md): a nuvem da fase 2 (Azure) era demonstração opcional; esta decisão a substitui como alvo — a fase 3 exige nuvem por enunciado, e o provedor muda para AWS

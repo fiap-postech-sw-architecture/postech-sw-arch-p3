@@ -127,4 +127,15 @@ Os cinco repositórios da fase 3 (`p3`, `p3-lambda`, `p3-infra-k8s`, `p3-infra-d
 * Minutos ilimitados do Actions em repositório público — o risco 5 da RFC-003 (cota) deixa de existir. A cota já havia renovado em 01/08/2026, quando os pipelines dos quatro repos rodaram verdes pela primeira vez (Desbloqueio 2).
 * A convenção de PR de (a) continua como prática, agora reforçada pela proteção técnica.
 
+### (f) Integração privada e ordem operacional (2026-09-07)
+
+A ordem de deploy de (c) permanece **`infra-db` → `infra-k8s` → `app` →
+`lambda`/gateway**, mas o contrato entre os dois últimos repositórios muda. O
+app cria um NLB interno e fornece o ARN do listener TCP `8000`; o Terraform da
+Lambda recebe esse ARN e cria o VPC Link e as integrações privadas do Gateway.
+
+O smoke do app no EKS usa `kubectl port-forward`, pois o runner não acessa o
+NLB interno. A desmontagem segue a ordem inversa: Lambda/Gateway/VPC Link →
+app/NLB → EKS → RDS, evitando dependências de rede órfãs.
+
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

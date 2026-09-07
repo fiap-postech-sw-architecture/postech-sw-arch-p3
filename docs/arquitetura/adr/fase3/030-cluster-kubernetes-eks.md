@@ -82,6 +82,24 @@ Adotar o **Amazon EKS**, provisionado por **Terraform no repositório `postech-s
 * Versões de EKS/Kubernetes, desenho de VPC/subnets e detalhes do node group ficam no repo `postech-sw-arch-p3-infra-k8s`, fora deste ADR
 * A exposição pública (LoadBalancer/Ingress) e a integração com o API Gateway (RF-026) são decididas no [ADR-027](027-api-gateway-aws.md), não aqui — o Terraform do gateway vive no repo `p3-lambda` (ADR-027), não no `p3-infra-k8s`
 
+## Adendo (2026-09-07) — subnets privadas e NLB interno
+
+O Terraform do repositório `postech-sw-arch-p3-infra-k8s` cria duas subnets
+privadas na VPC default, uma em `us-east-1a` (`172.31.240.0/24`) e outra em
+`us-east-1b` (`172.31.241.0/24`). Cada subnet usa uma route table sem rota
+default, não recebe IP público e não depende de NAT Gateway.
+
+As subnets recebem a tag `kubernetes.io/role/internal-elb = 1` e a tag
+compartilhada do cluster. O overlay EKS usa as annotations de tipo `nlb`, esquema
+interno e cross-zone load balancing. Assim, o controlador disponível no cluster
+cria um NLB privado capaz de alcançar os nodes distribuídos nas demais AZs, sem
+instalar o AWS Load Balancer Controller. O node group e o endpoint do control
+plane continuam nas subnets públicas para preservar o acesso operacional.
+
+O NLB é acessado externamente apenas pelo VPC Link definido no ADR-027. O smoke
+do pipeline usa `kubectl port-forward`, sem depender de conectividade pública
+com o Load Balancer.
+
 ## Decisões Relacionadas
 
 - [ADR-016](../fase2/016-plataforma-kubernetes.md): decidiu kind como plataforma única da fase 2 e previu a migração para EKS como troca de módulo — este ADR executa essa previsão, mantendo o kind no papel local

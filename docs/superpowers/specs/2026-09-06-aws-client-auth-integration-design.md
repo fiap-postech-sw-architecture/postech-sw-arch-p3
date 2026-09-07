@@ -1,6 +1,10 @@
 # Integração AWS da autenticação de clientes
 
+> [↑ Raiz do projeto](../../../README.md)
+
 **Data:** 2026-09-06
+
+**Última revisão:** 2026-09-07
 
 **Status:** aprovado para implementação
 
@@ -21,6 +25,8 @@ quatro repositórios da entrega.
 - Manter o claim `papel="cliente"`.
 - Permitir que a Lambda de autenticação consulte o RDS privado.
 - Encaminhar rotas protegidas do API Gateway para a aplicação no EKS.
+- Manter o tráfego API Gateway → EKS privado por VPC Link e NLB interno.
+- Criar duas subnets privadas na VPC default, sem NAT Gateway.
 - Fazer a aplicação reconhecer o papel `cliente`.
 - Expor listagem e detalhe das ordens pertencentes ao cliente autenticado.
 - Remover o profile AWS fixo dos três providers Terraform.
@@ -36,7 +42,7 @@ quatro repositórios da entrega.
 - Substituir o JWT HS256 ou o segredo compartilhado.
 - Transformar o acompanhamento público existente em rota autenticada.
 - Criar novos fluxos de negócio ou telas.
-- Criar VPC, NAT Gateway, Cognito, Secrets Manager ou recursos IAM.
+- Criar uma nova VPC, NAT Gateway, Cognito, Secrets Manager ou recursos IAM.
 - Automatizar criação ou destruição de recursos AWS sem autorização explícita.
 - Refatorações não necessárias para cumprir o requisito da fase 3.
 
@@ -48,7 +54,9 @@ flowchart LR
     G -->|"POST /auth"| L["Lambda autenticação CPF"]
     L --> R["RDS PostgreSQL privado"]
     G -.-> Z["Lambda authorizer"]
-    G -->|"Rotas /minhas-ordens protegidas"| A["Aplicação no EKS"]
+    G -->|"Rotas /minhas-ordens protegidas"| V["VPC Link"]
+    V --> N["NLB interno"]
+    N --> A["Aplicação no EKS"]
     A --> R
     A -.->|"Revalida JWT e papel cliente"| A
 ```
@@ -60,11 +68,31 @@ VPC default. O acesso à porta 5432 continua limitado à própria VPC.
 
 ### Kubernetes
 
-O repositório `postech-sw-arch-p3-infra-k8s` mantém o EKS e o node group na VPC
-default. A aplicação é publicada por um `Service` do tipo `LoadBalancer`, cujo
-endereço será fornecido ao Terraform do Gateway após o deploy da aplicação.
-Como o Learner Lab nega `iam:GetRole`, o ARN da `LabRole` existente será
-montado com o account ID retornado por STS, sem consultar ou criar IAM.
+O repositório `postech-sw-arch-p3-infra-k8s` mantém o EKS e o node group nas
+subnets públicas da VPC default. Ele também cria duas subnets privadas `/24`,
+em `us-east-1a` e `us-east-1b`, com route table sem rota default e sem NAT:
+
+- `172.31.240.0/24`;
+- `172.31.241.0/24`.
+
+Esses CIDRs foram escolhidos após inventário somente leitura da VPC default
+`172.31.0.0/16`, que possui apenas seis subnets públicas entre
+`172.31.0.0/20` e `172.31.80.0/20`. As novas subnets recebem as tags de
+descoberta do Kubernetes para Load Balancer interno.
+
+A aplicação é publicada por um `Service` do tipo `LoadBalancer` com três
+annotations:
+
+- `service.beta.kubernetes.io/aws-load-balancer-type: "nlb"`;
+- `service.beta.kubernetes.io/aws-load-balancer-internal: "true"`;
+- `service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"`.
+
+Cross-zone load balancing permite que o NLB nas duas subnets alcance os nodes
+distribuídos nas demais AZs. Essa estratégia usa o controlador já disponível
+no EKS e não adiciona o AWS Load Balancer Controller. Após o deploy, o ARN do
+listener TCP `8000` será fornecido ao Terraform do Gateway. Como o Learner Lab
+nega `iam:GetRole`, o ARN da `LabRole` existente será montado com o account ID
+retornado por STS, sem consultar ou criar IAM.
 
 ### Lambda e API Gateway
 
@@ -76,12 +104,18 @@ O repositório `postech-sw-arch-p3-lambda` terá as seguintes responsabilidades:
 - manter o authorizer fora da VPC, pois ele apenas valida o JWT;
 - manter `POST /auth` integrado à Lambda de autenticação;
 - remover a rota provisória `GET /auth/exemplo-protegido`;
-- criar uma integração HTTP proxy com o Load Balancer da aplicação;
+- criar um VPC Link nas duas subnets privadas;
+- descobrir essas subnets pelas tags na VPC default;
+- limitar a saída do security group do VPC Link a TCP `8000` na VPC;
+- criar uma integração HTTP proxy privada com o listener do NLB interno;
+- reutilizar essa integração nas duas rotas `GET` de cliente;
+- configurar `"overwrite:path" = "$request.path"` na integração;
 - proteger as rotas de cliente com o Lambda authorizer.
 
-O endereço base da aplicação será uma variável obrigatória do Terraform da
-Lambda. Não haverá leitura ou dependência entre states Terraform dos
-repositórios.
+O ARN do listener da aplicação será a variável obrigatória
+`app_listener_arn` do Terraform da Lambda. Não haverá leitura ou dependência
+entre states Terraform dos repositórios. O ARN será obtido depois do deploy do
+app e repassado explicitamente no fluxo manual ou pelo secret do CD.
 
 ### State Terraform
 
@@ -203,7 +237,9 @@ O desenvolvimento seguirá os padrões e gates já existentes em cada repositór
 - plans sem criação antes da revisão;
 - backend S3, criptografia e lock nativo configurados nos três states;
 - plan da Lambda confirma VPC somente na função de autenticação;
-- plan do Gateway confirma integração com o app e authorizer nas duas rotas.
+- plan do EKS confirma duas subnets privadas sem rota default ou NAT;
+- render do overlay EKS confirma NLB interno;
+- plan do Gateway confirma VPC Link, listener ARN e sobrescrita do path.
 
 ### Fluxo integrado
 
@@ -230,8 +266,9 @@ A implantação seguirá esta ordem:
 2. RDS provisionado manualmente;
 3. EKS provisionado manualmente;
 4. aplicação implantada no EKS pelo pipeline da branch `homolog`;
-5. Lambda e API Gateway provisionados manualmente;
-6. teste ponta a ponta.
+5. listener TCP `8000` do NLB interno identificado por AWS CLI;
+6. Lambda, VPC Link e API Gateway provisionados manualmente;
+7. teste ponta a ponta.
 
 O merge da aplicação em `homolog` publicará a imagem e executará o job de
 deploy no EKS. A promoção posterior de `homolog` para `main` será feita somente
@@ -240,6 +277,12 @@ após a validação do ambiente e aprovação do usuário.
 Após cada etapa, a infraestrutura será validada por comandos somente leitura da
 AWS CLI. O assistente não executará `terraform apply`, criação, alteração ou
 destruição na AWS sem autorização explícita do usuário.
+
+O desligamento respeitará a ordem inversa das dependências: Lambda/Gateway/VPC
+Link, aplicação/NLB, EKS e RDS. O EKS, o NLB e o VPC Link não possuem modo de
+pausa sem cobrança; por isso serão destruídos ao final da janela de gravação.
+O RDS pode ser parado temporariamente, observado o reinício automático após o
+limite do serviço, ou destruído depois da evidência final.
 
 ## Critérios de aceite
 
@@ -250,8 +293,13 @@ destruição na AWS sem autorização explícita do usuário.
 - A Lambda de autenticação acessa o RDS privado na AWS.
 - O authorizer rejeita token ausente, inválido ou expirado.
 - O Gateway encaminha as duas rotas protegidas para o EKS.
+- O app não possui Load Balancer público no overlay EKS.
+- O Gateway alcança o app somente pelo VPC Link e NLB interno.
+- Os stages `homolog` e `prod` preservam o caminho esperado pelo FastAPI.
 - A aplicação aceita o JWT de cliente e continua revalidando-o.
 - O cliente lista e consulta apenas as próprias ordens.
 - Ordem alheia é indistinguível de ordem inexistente.
 - Os recursos são demonstráveis em `us-east-1` na conta AWS Academy.
 - Nenhum item fora do escopo é introduzido.
+
+> [↑ Raiz do projeto](../../../README.md)

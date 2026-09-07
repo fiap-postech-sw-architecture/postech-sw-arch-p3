@@ -21,7 +21,7 @@ Como nas [RFC-001](../rfc-001-design-do-sistema.md) e [RFC-002](../fase2/rfc-002
 | **Proposta Técnica** | Seções 2 (Topologia de nuvem), 3 (Topologia local espelho), 4 (Diagrama de componentes), 5 (Diagramas de sequência), 6 (Deploy multi-repo), 7 (Correlação de logs e traces). |
 | **Impacto Esperado** | RF-025–RF-027, RN-021/RN-022 e RNF-025–RNF-030 endereçados com custo pessoal zero (AWS Academy), desenvolvimento 100% local e nuvem restrita a janelas de validação/demo. |
 | **Alternativas Consideradas** | Detalhadas decisão a decisão nos [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md) a [ADR-033](../../adr/fase3/033-cicd-multi-repo.md). Resumo na seção 8. |
-| **Pontos em Aberto** | **Decididos na implementação**: nome da rota de autenticação — `POST /auth` (`terraform/main.tf` do repo `p3-lambda`); integração gateway → app no EKS — integração `HTTP_PROXY` para a URL pública do Service LoadBalancer ([Adendo (c) do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#c-ordem-de-deploy-corrigida)). **Segue em aberto**: colocação da Lambda na VPC do RDS (*detalhamento, decisão na implementação*, seção 2). Gestão do `JWT_SECRET` decidida no ADR-033 (GitHub Secrets/`TF_VAR_*`; SSM/Secrets Manager descartados pelo IAM restrito do Learner Lab). |
+| **Pontos em Aberto** | **Decididos na implementação**: `POST /auth`; Lambda de autenticação na VPC do RDS; integração privada `HTTP_PROXY` por VPC Link e NLB interno; `JWT_SECRET` por GitHub Secrets/`TF_VAR_*`. Não há decisão arquitetural em aberto para o fluxo de autenticação de clientes. |
 
 ---
 
@@ -51,13 +51,13 @@ A nuvem da fase 3 é a **AWS via conta AWS Academy Learner Lab**, região fixa `
 | Restrição | Consequência no desenho |
 |---|---|
 | Sessões de ~4h com credenciais rotativas | secrets de CI re-gravados a cada _Start Lab_ (runbook); nenhum ambiente sempre-no-ar |
-| IAM travado (`LabRole` fixa) | Terraform nunca cria roles — Lambda, authorizer e EKS referenciam a `LabRole` por data source |
-| Budget pequeno com encerramento definitivo | `terraform destroy` pós-demo obrigatório; desenvolvimento 100% local (seção 3) |
-| State Terraform local, não versionado | vida útil de qualquer provisionamento é a janela de uma sessão; backend remoto seria complexidade sem benefício |
+| IAM travado (`LabRole` fixa) | Terraform nunca cria roles; forma o ARN da `LabRole` com o account ID retornado por STS, sem `iam:GetRole` |
+| Budget pequeno com encerramento definitivo | nuvem restrita à preparação e gravação; recursos cobrados destruídos ao final da janela de até sete dias |
+| Credenciais efêmeras e execução local/CI | três states independentes no bucket S3 privado, com versionamento e lock nativo |
 
 ### Borda serverless: gateway + duas Lambdas
 
-- **Amazon API Gateway, modo HTTP API** ([ADR-027](../../adr/fase3/027-api-gateway-aws.md)): porta de entrada única do sistema na nuvem. Roteia **por prefixo, sem reescrever caminhos**: a rota de autenticação de cliente vai à Lambda de autenticação; as rotas protegidas do app passam pelo Lambda authorizer antes de seguir ao cluster; rotas públicas (`GET /api/v1/saude`, acompanhamento público) passam sem authorizer. O mecanismo de integração gateway → app no EKS (VPC Link × endpoint LoadBalancer) é *detalhamento, decisão na implementação*.
+- **Amazon API Gateway, modo HTTP API** ([ADR-027](../../adr/fase3/027-api-gateway-aws.md)): porta de entrada única do sistema na nuvem. A rota de autenticação de cliente vai à Lambda de autenticação; as rotas protegidas do app passam pelo Lambda authorizer e seguem por VPC Link até o listener do NLB interno. O parameter mapping remove o prefixo do stage e preserva o caminho esperado pelo FastAPI. O Service da aplicação não publica endpoint acessível pela internet.
 - **Lambda de autenticação** ([ADR-028](../../adr/fase3/028-autenticacao-serverless-cpf.md)): runtime `python3.13`, valida formato do CPF com brutils, consulta o cliente no RDS pela mesma estratégia `documento_hash` do app, nega token a CPF inexistente ou cliente inativo (RN-022, resposta 401 indistinta para não vazar existência de CPF) e emite JWT HS256 com o `JWT_SECRET` compartilhado e a claim `papel="cliente"` (RN-021). Acesso ao banco somente leitura, restrito à consulta de cliente.
 - **Lambda authorizer** ([ADR-027](../../adr/fase3/027-api-gateway-aws.md)): valida a assinatura HS256 do token (emitido pela Lambda de autenticação ou pelo login interno do app — mesmo segredo, mesmo validador) antes de o gateway rotear às rotas sensíveis. O app **mantém a validação redundante** em `obter_usuario_atual` (defense in depth + paridade local).
 
@@ -73,14 +73,14 @@ O **Amazon EKS** ([ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md)) roda
 
 **Amazon RDS for PostgreSQL 16**, `db.t3.micro` single-AZ ([ADR-031](../../adr/fase3/031-banco-gerenciado-rds.md)) — mesmo engine e versão da fase 2, mudando apenas o operador. Consumidores: o app no EKS (leitura/escrita via `DATABASE_URL`), o relay (claim da outbox) e a Lambda de autenticação (somente leitura de clientes).
 
-**Segurança de rede**: RDS **sem exposição pública**, acessível apenas de dentro da VPC — security groups liberando os nodes do EKS e a Lambda de autenticação (que precisa de configuração de VPC para alcançar o banco — *detalhamento, decisão na implementação*, junto com o desenho fino de subnets). A costura de conectividade entre os states Terraform do cluster e do banco é uma dependência de ordem de provisionamento documentada (seção 6). A gestão do `JWT_SECRET` compartilhado entre app e Lambda é decidida no [ADR-033](../../adr/fase3/033-cicd-multi-repo.md): GitHub Secrets/`TF_VAR_*` nos pipelines e `terraform.tfvars` local git-ignored no fluxo manual — SSM/Secrets Manager descartados pelas restrições de IAM/KMS do Learner Lab ([ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md)).
+**Segurança de rede**: RDS **sem exposição pública**, acessível apenas de dentro da VPC; a Lambda de autenticação entra na VPC com saída limitada ao PostgreSQL. O app permanece no EKS e o tráfego Gateway → app entra por VPC Link e NLB interno em duas subnets privadas sem rota default ou NAT. A gestão do `JWT_SECRET` compartilhado entre app e Lambda é decidida no [ADR-033](../../adr/fase3/033-cicd-multi-repo.md): GitHub Secrets/`TF_VAR_*` nos pipelines e `terraform.tfvars` local git-ignored no fluxo manual — SSM/Secrets Manager descartados pelas restrições de IAM/KMS do Learner Lab ([ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md)).
 
 ### Onde vive cada Terraform
 
 | Repositório | Provisiona | ADRs |
 |---|---|---|
-| `postech-sw-arch-p3-lambda` | API Gateway (HTTP API, rotas, authorizer) + Lambda de autenticação + Lambda authorizer; template SAM versionado só para emulação local | [ADR-027](../../adr/fase3/027-api-gateway-aws.md), [ADR-028](../../adr/fase3/028-autenticacao-serverless-cpf.md), [ADR-029](../../adr/fase3/029-emulacao-local-lambda.md) |
-| `postech-sw-arch-p3-infra-k8s` | Cluster EKS (node group, metrics-server) | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) |
+| `postech-sw-arch-p3-lambda` | API Gateway, rotas, authorizer, VPC Link, Lambda de autenticação e Lambda authorizer; SAM apenas para a autenticação local | [ADR-027](../../adr/fase3/027-api-gateway-aws.md), [ADR-028](../../adr/fase3/028-autenticacao-serverless-cpf.md), [ADR-029](../../adr/fase3/029-emulacao-local-lambda.md) |
+| `postech-sw-arch-p3-infra-k8s` | Cluster EKS, node group, metrics-server e duas subnets privadas para NLB/VPC Link | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) |
 | `postech-sw-arch-p3-infra-db` | RDS PostgreSQL 16 (instância, subnet group, security group) | [ADR-031](../../adr/fase3/031-banco-gerenciado-rds.md) |
 | `postech-sw-arch-p3` | Nenhum Terraform — manifests `k8s/` da aplicação (deploy no cluster via pipeline do app) | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md), [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) |
 
@@ -186,15 +186,15 @@ O desenvolvimento é **100% local** ([ADR-026](../../adr/fase3/026-cloud-alvo-aw
 
 - **kind + `k8s/`**: o cluster local da fase 2 permanece o alvo de dev e demo sem custo ([ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md)), agora provisionado pelo dev-loop (`make`) em vez do Terraform do monorepo; o PostgreSQL 16 local roda em Docker/kind com o mesmo engine e versão do RDS;
 - **docker-compose**: o caminho rápido de desenvolvimento (app + banco + Mailpit + Redis), herdado sem mudança;
-- **SAM CLI** ([ADR-029](../../adr/fase3/029-emulacao-local-lambda.md)): `sam local invoke` e `sam local start-api` emulam o par API Gateway + Lambda **para a rota de autenticação e para a rota protegida com o Lambda authorizer** (tabela de paridade abaixo), com o runtime real `python3.13` em container; os testes que valem para cobertura e CI são pytest puro (handler direto + testcontainers), sem emulação.
+- **SAM CLI** ([ADR-029](../../adr/fase3/029-emulacao-local-lambda.md)): `sam local invoke` e `sam local start-api` emulam o par API Gateway + Lambda para `POST /auth`, com o runtime real `python3.13` em container; o authorizer é validado por pytest e o proxy privado existe somente na AWS.
 
 Paridade cloud × local, componente a componente:
 
 | Componente | Cloud (AWS) | Local | Paridade |
 |---|---|---|---|
 | API Gateway — rota de autenticação | HTTP API → Lambda | `sam local start-api` (gateway emulado + function) | **Sim** — mesma rota, mesmo formato de evento |
-| API Gateway — roteamento às rotas do app | HTTP API → authorizer → app no EKS | Rota de autenticação e rota protegida emuladas no `sam local start-api`; o proxy até o app no kind segue inexistente (as rotas do app ficam expostas direto) | **Paridade parcial** — a peça de segurança (authorizer) é emulada; o roteamento proxy é aceito sem paridade ([ADR-027](../../adr/fase3/027-api-gateway-aws.md) + Adendo), com validação JWT redundante no app |
-| Lambda authorizer | valida JWT na borda | `sam local start-api` com o authorizer declarado no `template.yaml` (rota protegida de exemplo) | **Paridade funcional** desde 2026-07-11 (Adendo do [ADR-029](../../adr/fase3/029-emulacao-local-lambda.md)); verificado ao vivo: 401 sem token, 403 token adulterado, request com token válido alcança o handler |
+| API Gateway — roteamento às rotas do app | HTTP API → authorizer → VPC Link → NLB → app | As rotas são chamadas diretamente no app local | **Paridade parcial** — o transporte privado só existe na AWS; a validação redundante mantém a mesma segurança no app |
+| Lambda authorizer | valida JWT na borda | pytest executa o handler diretamente; o template SAM não declara rota protegida | **Paridade de lógica** — assinatura, expiração, tipo e papel são cobertos sem emular o vínculo do Gateway |
 | Lambda de autenticação | função `python3.13` na AWS | pytest (handler direto + testcontainers) + SAM (runtime real em container) | **Sim** — mesmo handler, mesmo Postgres |
 | Cluster Kubernetes | EKS (overlay kustomize EKS) | kind (manifests `k8s/*.yaml` aplicados direto — não há overlay local) | **Sim** — mesmos manifests base, HPA e probes; muda o overlay |
 | Banco | RDS PostgreSQL 16 | PostgreSQL 16 em Docker/kind | **Sim** — mesmo engine, mesma versão, mesmas migrações |
@@ -218,8 +218,10 @@ flowchart TB
             apigw["Amazon API Gateway<br/>HTTP API (ADR-027)"]
             lambda_auth["Lambda de autenticação<br/>python3.13 (ADR-028)"]
             authorizer["Lambda authorizer<br/>valida JWT HS256 (ADR-027)"]
+            vpclink["API Gateway VPC Link<br/>duas subnets privadas"]
         end
         subgraph eks["Amazon EKS (ADR-030) — Terraform em p3-infra-k8s · manifests k8s/ no repo p3"]
+            nlb["NLB interno<br/>listener TCP 8000"]
             app["PytStop API — Deployment<br/>Clean Architecture + HPA<br/>(valida JWT também — defense in depth)"]
             relay["Relay de eventos<br/>outbox → SMTP (ADR-022)"]
             redis["Redis — rate limiter"]
@@ -239,10 +241,12 @@ flowchart TB
 
     cliente -->|"POST rota de autenticação (CPF)"| apigw
     cliente -->|"rotas protegidas + Bearer"| apigw
-    interno -->|"login interno + rotas + Bearer"| apigw
+    interno -->|"UI / canal interno"| app
     apigw -->|"invoca"| lambda_auth
     apigw -.->|"consulta autorização"| authorizer
-    apigw -->|"roteia por prefixo"| app
+    apigw -->|"rotas protegidas"| vpclink
+    vpclink --> nlb
+    nlb --> app
     lambda_auth -->|"consulta cliente<br/>(documento_hash, ativo) — só leitura"| rds
     app -->|"SQL via DATABASE_URL"| rds
     app -->|"grava outbox + NOTIFY<br/>na mesma transação"| rds
@@ -261,8 +265,8 @@ flowchart TB
 Notas de leitura:
 
 - Linhas cheias são o caminho principal de requisições e dados; pontilhadas são fluxos de autorização, telemetria e coleta.
-- Rotas públicas (`GET /api/v1/saude`, acompanhamento público) passam pelo gateway **sem** authorizer.
-- No ambiente local (seção 3), a caixa `borda` é substituída por `sam local start-api` (rota de autenticação + rota protegida com o authorizer; sem o proxy até o app) e o EKS pelo kind — o resto do diagrama é idêntico.
+- Neste incremento, o Gateway publica `POST /auth` e as duas rotas protegidas `/api/v1/minhas-ordens`; as demais rotas mantêm seus canais atuais.
+- No ambiente local, `sam local start-api` cobre `POST /auth`; as rotas de cliente são chamadas diretamente no app, e o EKS é substituído pelo kind.
 
 ## 5. Diagramas de sequência
 
@@ -307,7 +311,7 @@ sequenceDiagram
                 GW-->>C: 403 (não chega ao app)
             else token válido
                 AZ-->>GW: allow
-                GW->>APP: roteia por prefixo (propaga X-Request-ID)
+                GW->>APP: VPC Link → NLB interno (preserva path e Authorization)
                 APP->>APP: revalida JWT + RBAC (defense in depth)
                 APP->>DB: consulta/escrita
                 APP-->>GW: resposta
@@ -327,7 +331,6 @@ Cobre o fluxo exigido pelo RNF-030, sobre as rotas reais do app: `POST /api/v1/o
 sequenceDiagram
     autonumber
     actor A as Usuário interno (papel admin)
-    participant GW as API Gateway
     participant APP as PytStop API (EKS)
     participant UC as CriarOrdem (use case)
     participant UOW as UnitOfWork + Repositório
@@ -337,9 +340,7 @@ sequenceDiagram
 
     rect rgb(235, 242, 250)
         Note over A,DB: Abertura da OS (RF-020 herdado)
-        A->>GW: POST /api/v1/ordens-de-servico + Bearer
-        GW->>GW: Lambda authorizer valida o JWT
-        GW->>APP: roteia (propaga X-Request-ID)
+        A->>APP: POST /api/v1/ordens-de-servico + Bearer pelo canal interno
         APP->>APP: revalida JWT + exigir_papel
         APP->>UC: executar(CriarOrdemDTO)
         UC->>UC: valida cliente e veículo (ports) e monta itens em memória
@@ -365,7 +366,7 @@ O acompanhamento público por placa+documento (`router_publico.py`) permanece co
 
 ## 6. Fluxo de deploy multi-repo (CI/CD)
 
-Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)): `ci.yml` com os gates adequados ao conteúdo e `cd.yml` com deploy automático por branch — push em **`homolog` → ambiente de homologação**; push em **`main` → produção**. A proteção técnica da `main` (sem commit direto, PR obrigatório) mostrou-se **inviável na org atual** (plano free + repos privados, HTTP 403 "Upgrade to GitHub Pro"); vale o fluxo de PR obrigatório por convenção documentada — ver [Adendo do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#adendo-2026-07-11--limitações-constatadas-e-decisões-complementares), item (a).
+Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)): `ci.yml` com os gates adequados ao conteúdo e `cd.yml` com deploy automático por branch — push em **`homolog` → ambiente de homologação**; push em **`main` → produção**. Desde que os repositórios se tornaram públicos, a `main` possui proteção técnica com PR e checks obrigatórios — ver [Adendo (e) do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#e-repositórios-públicos-e-branch-protection-ativa-2026-09-03).
 
 | Repo | `ci.yml` | `cd.yml` |
 |---|---|---|
@@ -381,8 +382,8 @@ Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo
 ```
 1. p3-infra-db    →  RDS no ar (endpoint + credenciais)
 2. p3-infra-k8s   →  EKS no ar (kubeconfig)
-3. p3 (app)       →  migração + deploy da aplicação no EKS (URL pública do Service LoadBalancer)
-4. p3-lambda      →  gateway + Lambdas (a rota HTTP_PROXY exige a URL pública do app; a function precisa do endpoint do banco)
+3. p3 (app)       →  migração + deploy da aplicação no EKS (NLB interno + listener TCP 8000)
+4. p3-lambda      →  gateway + Lambdas + VPC Link (exige o ARN do listener e o endpoint do banco)
 ```
 
 O gatilho entre repos é manual (README/runbook) — quatro pipelines pequenos com deploy pouco frequente não justificam orquestração cross-repo ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)).
@@ -405,15 +406,15 @@ O requisito RNF-029 exige logs JSON com correlação entre requisições — e a
 
 | # | Risco | Origem | Mitigação |
 |---|---|---|---|
-| 1 | Budget Academy pequeno com encerramento **definitivo** da conta ao esgotar — EKS + RDS + NAT consomem rápido | [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md) | desenvolvimento 100% local; nuvem só em janelas de validação/demo; `terraform destroy` pós-demo obrigatório no runbook |
+| 1 | Budget Academy pequeno com encerramento **definitivo** da conta ao esgotar — EKS, RDS, NLB e VPC Link consomem enquanto existem | [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md) | desenvolvimento local; nuvem limitada à preparação e gravação; desmontagem inversa ao final da janela de até sete dias |
 | 2 | Credenciais de ~4h: pipeline que toca a AWS falha com credencial expirada; esquecer a rotação derruba o CD | [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md), [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | re-gravação dos secrets como primeiro passo do runbook de sessão; nenhum fluxo assume ambiente sempre-no-ar |
-| 3 | Paridade parcial do gateway: o trecho gateway → app no EKS não existe localmente — só testável na AWS | [ADR-027](../../adr/fase3/027-api-gateway-aws.md) | `sam local start-api` cobre a rota de autenticação; validação JWT redundante no app iguala a semântica de segurança; teste do roteamento completo planejado dentro da primeira sessão de validação |
-| 4 | EKS com `LabRole` fixa: IAM não-idiomático (sem roles mínimas por recurso), inaceitável em produção real | [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md), [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | restrição dura da conta, documentada como concessão; Terraform referencia a role por data source — trocar para roles próprias em conta real é mudança pontual |
+| 3 | Paridade parcial do gateway: o trecho VPC Link → NLB interno → app não existe localmente | [ADR-027](../../adr/fase3/027-api-gateway-aws.md) | `sam local start-api` cobre a autenticação; validação JWT redundante preserva a segurança; o roteamento completo é validado na AWS |
+| 4 | EKS com `LabRole` fixa: IAM não-idiomático (sem roles mínimas por recurso), inaceitável em produção real | [ADR-026](../../adr/fase3/026-cloud-alvo-aws-academy.md), [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | restrição da conta; Terraform forma o ARN com o account ID retornado por STS — trocar para roles próprias em conta real é mudança pontual |
 | 5 | Cota do GitHub Actions esgotada em julho/2026: "pipelines funcionais" (entregável) não demonstráveis até a renovação — **mitigado**: cota renovada em 01/08/2026 (runs verdes nos 4 repos) e repositórios públicos em 03/09/2026 (minutos ilimitados) | [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | gate local espelho como pré-check; runs verdes referenciados no documento de entrega |
 | 6 | Correlação quebrada na borda: o middleware original ignorava id externo; scrub de PII precisa continuar valendo | gap analysis §5 | **Mitigado (implementado)**: o middleware aceita o `X-Request-ID` do gateway quando válido, coberto por teste; seção 7 |
 | 7 | Deriva entre template SAM e Terraform da function (dois descritores) | [ADR-029](../../adr/fase3/029-emulacao-local-lambda.md) | fronteira de papéis explícita: mudança real sempre no Terraform; o template segue para manter a emulação fiel; `sam deploy` proibido |
-| 8 | Drift entre overlays kind × EKS | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | base `k8s/` única; overlay EKS restrito ao que de fato difere do kind (imagens via GHCR com `imagePullSecrets`, Service `LoadBalancer` na API, `DATABASE_URL` via Secret `postgres-credentials` apontando ao RDS); validação no kind a cada PR |
-| 9 | Ordem manual de deploy entre repos violada por descuido (ex.: lambda antes do banco existir) | [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | ordem documentada no README de cada repo e no runbook da demo |
+| 8 | Drift entre overlays kind × EKS | [ADR-030](../../adr/fase3/030-cluster-kubernetes-eks.md) | base `k8s/` única; overlay EKS limitado às imagens GHCR, secrets de nuvem e NLB interno; render e smoke por port-forward a cada mudança |
+| 9 | Ordem manual de deploy entre repos violada, deixando listener ou VPC Link órfão | [ADR-033](../../adr/fase3/033-cicd-multi-repo.md) | ordem de criação e desmontagem documentada no README e no runbook |
 | 10 | Contratos duplicados entre app e Lambda (hash de documento, claims) sem código compartilhado | [ADR-028](../../adr/fase3/028-autenticacao-serverless-cpf.md) | testes de integração na Lambda validando o token contra as claims esperadas pelo app |
 | 11 | RDS single-AZ sem réplica: RPO/RTO de demo, não de produção | [ADR-031](../../adr/fase3/031-banco-gerenciado-rds.md) | limitação consciente; upgrade (Multi-AZ, réplica) é parâmetro Terraform, não mudança de arquitetura |
 | 12 | Stack de monitoramento consome recursos do node group mínimo | [ADR-032](../../adr/fase3/032-monitoramento-grafana-loki.md) | sizing observado no kind antes do EKS; node group elástico como folga |
