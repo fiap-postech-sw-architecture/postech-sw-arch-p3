@@ -10,6 +10,7 @@ Updated by AI agents at task end per `postech-ai-helper/ai/canonical/task-end-re
 
 ## Recent decisions
 
+- 2026-09-07 - O overlay EKS publica `pytstop-api` por NLB interno com cross-zone; o CD valida a API por `kubectl port-forward`, pois o balanceador não possui endpoint público
 - 2026-09-07 - Gateway → EKS passa de URL pública para integração privada: HTTP API usa VPC Link e listener TCP 8000 de NLB interno; infra-k8s cria `172.31.240.0/24` (us-east-1a) e `172.31.241.0/24` (us-east-1b) na VPC default, sem rota default ou NAT. CIDRs validados contra a conta Academy (VPC `172.31.0.0/16`, seis subnets públicas até `172.31.80.0/20`). Ordem: RDS → EKS → app/NLB → Lambda/Gateway/VPC Link; desmontagem inversa. App e handlers Lambda não mudam para esse transporte; contratos ficam nos Terraform/manifests.
 - 2026-09-06 - Backend Terraform remoto aprovado para o fechamento AWS: bucket S3 privado/versionado `pytstop-terraform-state-924563550535`, states independentes `rds/`, `eks/` e `lambda/`, lock nativo S3 com Terraform >=1.10 e sem DynamoDB; execução local e Actions passam a compartilhar o mesmo state
 - 2026-09-03 - MOTIVO dos repos publicos (corrige a entrada abaixo, que fala em 'decisao do usuario'): orientacao da FIAP — a correcao do Tech Challenge passou a ser automatizada e exige repositorio publico; o p2 foi aberto pelo mesmo motivo. Regra canonica atualizada em `postech-ai-helper/ai/canonical/fiap-project.md`; `soat-architecture` como colaborador de leitura segue exigido pelo enunciado.

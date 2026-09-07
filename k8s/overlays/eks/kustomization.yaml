@@ -15,9 +15,8 @@
 #     SHA do commit). O placeholder `dev` e substituido pelo CD (sed no
 #     newTag). O GHCR e privado: os patches adicionam `imagePullSecrets:
 #     ghcr-credentials` (criacao abaixo).
-#   - API exposta por Service LoadBalancer (patch-api-service.yaml): e o
-#     endpoint publico que o API Gateway consome (RFC-003 §2 — VPC Link ×
-#     endpoint publico e detalhamento; adotado o endpoint publico via NLB/CLB).
+#   - API exposta por NLB interno (patch-api-service.yaml), com cross-zone
+#     habilitado e acesso do API Gateway exclusivamente pelo VPC Link.
 #   - BANCO = RDS (ADR-031), NAO ha Postgres in-cluster: a base k8s/ nao traz
 #     StatefulSet de banco (no kind ele vem do Terraform de /infra, que nao
 #     roda no EKS), entao nada a remover — os patches apenas apontam

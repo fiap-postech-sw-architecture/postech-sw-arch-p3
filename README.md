@@ -186,7 +186,7 @@ Passo a passo manual, portas completas (inclui Loki 3100), validação do HPA so
 
 ## Deploy na nuvem (EKS)
 
-O desenho aprovado para o alvo cloud usa os **mesmos manifests base** de `k8s/` com o overlay kustomize [`k8s/overlays/eks/`](k8s/overlays/eks/kustomization.yaml) ([ADR-030](docs/arquitetura/adr/fase3/030-cluster-kubernetes-eks.md)): imagens via GHCR (as mesmas que o CI publica por SHA), API atrás de um NLB interno consumido pelo API Gateway via VPC Link, `DATABASE_URL` apontando para o RDS via Secret `postgres-credentials` e **sem** metrics-server local (no EKS ele vem do provisionamento do cluster). A implementação do transporte privado está na branch `feat/aws-client-auth-integration`. Render local:
+O alvo cloud usa os **mesmos manifests base** de `k8s/` com o overlay kustomize [`k8s/overlays/eks/`](k8s/overlays/eks/kustomization.yaml) ([ADR-030](docs/arquitetura/adr/fase3/030-cluster-kubernetes-eks.md)): imagens via GHCR (as mesmas que o CI publica por SHA), API atrás de um NLB interno consumido pelo API Gateway via VPC Link, `DATABASE_URL` apontando para o RDS via Secret `postgres-credentials` e **sem** metrics-server local (no EKS ele vem do provisionamento do cluster). Render local:
 
 ```bash
 kubectl kustomize --load-restrictor=LoadRestrictionsNone k8s/overlays/eks
@@ -221,7 +221,7 @@ Atualização de dependências automatizada por [Dependabot](.github/dependabot.
 
 ## API
 
-Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose e `http://localhost:18000/docs` via port-forward do cluster. No desenho aprovado para a AWS, o NLB da API é interno e não expõe `/docs` diretamente à internet.
+Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose e `http://localhost:18000/docs` via port-forward do cluster. Na AWS, o NLB da API é interno e não expõe `/docs` diretamente à internet.
 
 | Grupo | Prefixo | Operações |
 |---|---|---|
