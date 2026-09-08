@@ -119,11 +119,11 @@ A ordem passa a ser **`infra-db` → `infra-k8s` → `app` (p3) → `lambda`/gat
 
 Os segredos de runtime (`JWT_SECRET`, `ENCRYPTION_KEY`, `ADMIN_PASSWORD`, `DATABASE_URL`) fluem por **GitHub Secrets** → `TF_VAR_*` (repos Terraform) ou `kubectl create secret` (deploy no EKS) nos pipelines; no fluxo manual, `terraform.tfvars`/arquivos de env locais git-ignored. AWS Secrets Manager e SSM Parameter Store foram descartados pelas restrições de IAM/KMS do Learner Lab ([ADR-026](026-cloud-alvo-aws-academy.md)).
 
-### (e) Repositórios públicos e branch protection ativa (2026-09-03)
+### (e) Repositórios públicos e registro da branch protection (2026-09-03)
 
 Os cinco repositórios da fase 3 (`p3`, `p3-lambda`, `p3-infra-k8s`, `p3-infra-db`, `p3-docs`) tornaram-se **públicos** em 03/09/2026 por orientação da FIAP: a correção do Tech Challenge passou a ser automatizada e exige repositórios públicos (o `p2` já havia sido aberto pelo mesmo motivo). A mudança coincide com a segunda opção registrada em (a). Antes da mudança, o gitleaks rodou sobre o histórico completo dos cinco; os únicos achados são segredos de demonstração já públicos desde a fase 2. Consequências:
 
-* A **branch protection da `main`** passou a ser viável no plano free e foi ativada nos cinco repositórios: PR obrigatório (sem commit direto, administradores incluídos), zero aprovações exigidas (o grupo revisa por convenção), checks obrigatórios onde existem (`p3`: os jobs de `ci.yml` e `security.yml`; `p3-lambda`: `gate` e `tf-validate`; repos de infra: `gate`). O `full-test-ci.yml` não entra na lista porque tem `paths-ignore` para documentação: um check obrigatório que não roda deixaria o PR só de docs bloqueado para sempre. A `homolog` fica livre para o deploy por push.
+* Na ocasião, registrou-se que a **branch protection da `main`** havia sido ativada nos cinco repositórios. A verificação posterior descrita em (g) corrigiu esse estado: o recurso está disponível, mas nenhuma proteção está ativa.
 * Minutos ilimitados do Actions em repositório público — o risco 5 da RFC-003 (cota) deixa de existir. A cota já havia renovado em 01/08/2026, quando os pipelines dos quatro repos rodaram verdes pela primeira vez (Desbloqueio 2).
 * A convenção de PR de (a) continua como prática, agora reforçada pela proteção técnica.
 
@@ -137,5 +137,22 @@ Lambda recebe esse ARN e cria o VPC Link e as integrações privadas do Gateway.
 O smoke do app no EKS usa `kubectl port-forward`, pois o runner não acessa o
 NLB interno. A desmontagem segue a ordem inversa: Lambda/Gateway/VPC Link →
 app/NLB → EKS → RDS, evitando dependências de rede órfãs.
+
+### (g) Correção do estado da branch protection (2026-09-07)
+
+Uma nova consulta aos cinco repositórios, pelos endpoints de branch protection
+e rulesets do GitHub, não encontrou proteção ativa. A conta operacional
+`Gryog` possui `write`, mas não `admin`; por isso, a tentativa de configurar a
+proteção retorna HTTP 404. Esta constatação substitui somente a afirmação de
+ativação registrada em (e): tornar os repositórios públicos deixou o recurso
+disponível no plano free, mas não concedeu a permissão administrativa necessária.
+
+Até um administrador ativar a regra, permanece a mitigação de (a): todas as
+mudanças seguem por PR, checks verdes, revisão dos comentários e merge manual.
+Os deploys de 07/09/2026 respeitaram esse fluxo nos quatro repositórios técnicos.
+A configuração pendente exige PR, inclui administradores e usa zero aprovações;
+checks: app (`lint`, `type-check`, `security`, `test`, `sbom`, `pip-audit`,
+`gitleaks`, `trivy`), Lambda (`gate`, `tf-validate`) e infra (`gate`). O
+`ci-plan` não é obrigatório porque o workflow ignora alterações documentais.
 
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

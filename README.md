@@ -205,7 +205,7 @@ As credenciais AWS Academy são rotativas (~4h por sessão): os GitHub Secrets s
 
 ## CI/CD
 
-Padrão da fase 3 ([ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)): deploy automático por branch — push em **`homolog`** implanta no ambiente **homologação**; push em **`main`**, em **produção**. Main protegida, PRs obrigatórios.
+Padrão da fase 3 ([ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)): deploy automático por branch — push em **`homolog`** implanta no ambiente **homologação**; push em **`main`**, em **produção**. PRs são obrigatórios por convenção; a proteção técnica da `main` depende de permissão administrativa no GitHub.
 
 | Workflow | Trigger | O que faz |
 |---|---|---|
@@ -217,7 +217,7 @@ Padrão da fase 3 ([ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md))
 
 Atualização de dependências automatizada por [Dependabot](.github/dependabot.yml) (uv, github-actions, docker), mensal e agrupada por ecossistema.
 
-> Pipelines em execução no GitHub Actions desde 01/08/2026 (a cota esgotada em julho renovou; o repositório é público desde 03/09/2026, com minutos ilimitados). A `main` é protegida: PR obrigatório, checks de CI e Security obrigatórios ([ADR-033, Adendo (e)](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)). O gate local espelho (`make check` e `make cd-local`) continua como pré-check antes de cada push.
+> Pipelines em execução no GitHub Actions desde 01/08/2026. O [CD de produção de 07/09/2026](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/actions/runs/34178566291) publicou as imagens e concluiu os deploys no kind e no EKS. A `main` ainda não possui proteção técnica porque a conta operacional tem `write`, mas não `admin`; PR, checks e aprovação manual permanecem obrigatórios por convenção ([ADR-033, Adendo (g)](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md#g-correção-do-estado-da-branch-protection-2026-09-07)).
 
 ## API
 
@@ -242,11 +242,11 @@ Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose
 | Documentação de arquitetura (ADRs 026–033, RFC-003, gap analysis) | ✅ completa |
 | Manifests k8s + stack de monitoramento no kind | ✅ no ar localmente (`make cd-local`) |
 | Overlay EKS + pipeline homolog/produção | ✅ commitados ([`k8s/overlays/eks/`](k8s/overlays/eks/kustomization.yaml), [`cd.yml`](.github/workflows/cd.yml)) |
-| Execução dos pipelines no GitHub Actions | ✅ runs verdes desde 01/08/2026 (CI, Security, CD `main`/`homolog`, full-test); `main` protegida desde 03/09/2026 |
-| Provisionamento EKS/RDS/gateway na AWS | ⏳ aguardando **credenciais AWS Academy** (sessões do Learner Lab; runbook no p3-docs) |
+| Execução dos pipelines no GitHub Actions | ✅ CI completo e [CD de produção](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/actions/runs/34178566291) verdes; proteção técnica da `main` pendente de permissão `admin` |
+| Provisionamento EKS/RDS/gateway na AWS | ✅ RDS, EKS, NLB interno, Lambda, API Gateway e VPC Link validados em `us-east-1` |
 | Vídeo de demonstração e PDF da entrega | ⏳ pendentes — passo a passo na issue de fechamento da fase 3 ([#16](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/issues/16)) |
 
-- Links de deploys ativos: **n/a permanente** — os ambientes AWS Academy são efêmeros por design (`terraform destroy` pós-demo, [ADR-026](docs/arquitetura/adr/fase3/026-cloud-alvo-aws-academy.md)); o repo documenta como subir o ambiente em minutos, e o PDF de submissão registra essa justificativa.
+- Endpoint público atual: `https://rs6lbkn7p4.execute-api.us-east-1.amazonaws.com/prod`. O ambiente AWS Academy é temporário; após a desmontagem, o run do CD permanece como evidência reproduzível.
 
 ## Desenvolvimento
 

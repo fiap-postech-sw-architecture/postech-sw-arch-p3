@@ -366,7 +366,7 @@ O acompanhamento público por placa+documento (`router_publico.py`) permanece co
 
 ## 6. Fluxo de deploy multi-repo (CI/CD)
 
-Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)): `ci.yml` com os gates adequados ao conteúdo e `cd.yml` com deploy automático por branch — push em **`homolog` → ambiente de homologação**; push em **`main` → produção**. Desde que os repositórios se tornaram públicos, a `main` possui proteção técnica com PR e checks obrigatórios — ver [Adendo (e) do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#e-repositórios-públicos-e-branch-protection-ativa-2026-09-03).
+Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)): `ci.yml` com os gates adequados ao conteúdo e `cd.yml` com deploy automático por branch — push em **`homolog` → ambiente de homologação**; push em **`main` → produção**. PR e checks são obrigatórios por convenção. A proteção técnica da `main` está pendente de uma conta com permissão administrativa, conforme o [Adendo (g) do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#g-correção-do-estado-da-branch-protection-2026-09-07).
 
 | Repo | `ci.yml` | `cd.yml` |
 |---|---|---|
@@ -387,6 +387,12 @@ Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo
 ```
 
 O gatilho entre repos é manual (README/runbook) — quatro pipelines pequenos com deploy pouco frequente não justificam orquestração cross-repo ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)).
+
+O fluxo de produção foi executado em 07/09/2026 na ordem documentada. Os quatro
+runs concluíram com sucesso: [RDS](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-infra-db/actions/runs/34177626665),
+[EKS](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-infra-k8s/actions/runs/34178105568),
+[aplicação](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/actions/runs/34178566291) e
+[Lambda/Gateway](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-lambda/actions/runs/34179043515).
 
 **Secrets rotativos do Academy**: cada _Start Lab_ emite novo trio access key + secret + session token; o primeiro passo do runbook de sessão (`aws-academy-setup.md`, repo `postech-sw-arch-p3-docs`) é re-gravar os GitHub Secrets dos repos que tocam a AWS. OIDC/segredos de longa duração são inviáveis nesta conta; promover a OIDC quando houver conta AWS estável é evolução compatível.
 
