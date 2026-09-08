@@ -112,6 +112,15 @@ class OrdemDeServicoSQLAlchemyRepository:
         self._session.add(ordem)
         self._session.flush()
 
+    def obter_por_id_e_cliente(
+        self, ordem_id: UUID, cliente_id: UUID
+    ) -> OrdemDeServico | None:
+        stmt = select(OrdemDeServico).where(
+            ordens_de_servico_table.c.id == ordem_id,
+            ordens_de_servico_table.c.cliente_id == cliente_id,
+        )
+        return self._session.scalars(stmt).one_or_none()
+
     def listar(
         self,
         offset: int = 0,
@@ -128,14 +137,50 @@ class OrdemDeServicoSQLAlchemyRepository:
         encerrados ficam fora (RN-019/RN-020); ``incluir_encerradas=True``
         devolve a visao completa, com encerradas ao final (prioridade 9).
         """
+        return self._listar(
+            offset=offset,
+            limit=limit,
+            incluir_encerradas=incluir_encerradas,
+            cliente_id=None,
+        )
+
+    def listar_por_cliente(
+        self,
+        cliente_id: UUID,
+        offset: int = 0,
+        limit: int = 20,
+        *,
+        incluir_encerradas: bool = False,
+    ) -> list[OrdemDeServico]:
+        return self._listar(
+            offset=offset,
+            limit=limit,
+            incluir_encerradas=incluir_encerradas,
+            cliente_id=cliente_id,
+        )
+
+    def _listar(
+        self,
+        offset: int,
+        limit: int,
+        *,
+        incluir_encerradas: bool,
+        cliente_id: UUID | None,
+    ) -> list[OrdemDeServico]:
         prioridade = case(
             _PRIORIDADE_STATUS,
             value=ordens_de_servico_table.c.status,
             else_=_PRIORIDADE_ENCERRADAS,
         )
+        stmt = select(OrdemDeServico)
+        if not incluir_encerradas:
+            stmt = stmt.where(
+                ordens_de_servico_table.c.status.notin_(_ESTADOS_ENCERRADOS)
+            )
+        if cliente_id is not None:
+            stmt = stmt.where(ordens_de_servico_table.c.cliente_id == cliente_id)
         stmt = (
-            select(OrdemDeServico)
-            .order_by(
+            stmt.order_by(
                 prioridade,
                 ordens_de_servico_table.c.criado_em.asc(),
                 ordens_de_servico_table.c.id,
@@ -143,10 +188,6 @@ class OrdemDeServicoSQLAlchemyRepository:
             .offset(offset)
             .limit(limit)
         )
-        if not incluir_encerradas:
-            stmt = stmt.where(
-                ordens_de_servico_table.c.status.notin_(_ESTADOS_ENCERRADOS)
-            )
         return list(self._session.scalars(stmt))
 
     def contar(self, *, incluir_encerradas: bool = True) -> int:
@@ -157,11 +198,24 @@ class OrdemDeServicoSQLAlchemyRepository:
         consistente com ``listar``; o default preserva o total historico
         usado pelas metricas.
         """
+        return self._contar(incluir_encerradas=incluir_encerradas, cliente_id=None)
+
+    def contar_por_cliente(
+        self, cliente_id: UUID, *, incluir_encerradas: bool = False
+    ) -> int:
+        return self._contar(
+            incluir_encerradas=incluir_encerradas,
+            cliente_id=cliente_id,
+        )
+
+    def _contar(self, *, incluir_encerradas: bool, cliente_id: UUID | None) -> int:
         stmt = select(func.count()).select_from(ordens_de_servico_table)
         if not incluir_encerradas:
             stmt = stmt.where(
                 ordens_de_servico_table.c.status.notin_(_ESTADOS_ENCERRADOS)
             )
+        if cliente_id is not None:
+            stmt = stmt.where(ordens_de_servico_table.c.cliente_id == cliente_id)
         result = self._session.scalar(stmt)
         return result if result is not None else 0
 

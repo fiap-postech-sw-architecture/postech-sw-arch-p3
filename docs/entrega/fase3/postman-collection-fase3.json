@@ -543,6 +543,61 @@
       },
       "description": "Function serverless de autenticacao (repo postech-sw-arch-p3-lambda). Local: sam local start-api (http://localhost:3000). AWS: output auth_url do Terraform. 200 access_token | 400 CPF malformado | 401 inexistente/inativo."
      }
+    },
+    {
+     "name": "GET /api/v1/minhas-ordens — cliente",
+     "request": {
+      "auth": {
+       "type": "bearer",
+       "bearer": [
+        {
+         "key": "token",
+         "value": "{{client_token}}",
+         "type": "string"
+        }
+       ]
+      },
+      "method": "GET",
+      "url": {
+       "raw": "{{protected_api_url}}/api/v1/minhas-ordens",
+       "host": [
+        "{{protected_api_url}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "minhas-ordens"
+       ]
+      }
+     }
+    },
+    {
+     "name": "GET /api/v1/minhas-ordens/{ordem_id} — cliente",
+     "request": {
+      "auth": {
+       "type": "bearer",
+       "bearer": [
+        {
+         "key": "token",
+         "value": "{{client_token}}",
+         "type": "string"
+        }
+       ]
+      },
+      "method": "GET",
+      "url": {
+       "raw": "{{protected_api_url}}/api/v1/minhas-ordens/{{client_ordem_id}}",
+       "host": [
+        "{{protected_api_url}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "minhas-ordens",
+        "{{client_ordem_id}}"
+       ]
+      }
+     }
     }
    ]
   },
@@ -9638,6 +9693,18 @@
   {
    "key": "gateway_url",
    "value": "http://localhost:3000"
+  },
+  {
+   "key": "protected_api_url",
+   "value": "http://localhost:18000"
+  },
+  {
+   "key": "client_token",
+   "value": ""
+  },
+  {
+   "key": "client_ordem_id",
+   "value": ""
   }
  ],
  "info": {

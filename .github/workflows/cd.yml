@@ -296,22 +296,24 @@ jobs:
           kubectl -n pytstop rollout status deployment/pytstop-api --timeout=300s
           kubectl -n pytstop rollout status deployment/pytstop-relay --timeout=300s
           kubectl -n pytstop rollout status deployment/pytstop-ui --timeout=300s
-      # O Service pytstop-api e LoadBalancer no overlay (endpoint publico que
-      # o API Gateway do p3-lambda consome). O NLB/CLB pode levar minutos
-      # para nascer e resolver DNS — o loop tolera isso.
+      # O NLB da API e interno; o smoke usa o canal autenticado do kubectl.
       - if: steps.aws.outputs.enabled == 'true'
-        name: Smoke test (LoadBalancer)
+        name: Smoke test (port-forward)
         run: |
-          for _ in $(seq 1 30); do
-            LB="$(kubectl -n pytstop get svc pytstop-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
-            if [ -n "$LB" ] && curl -fsS --max-time 5 "http://${LB}:8000/api/v1/saude"; then
-              echo
-              echo "smoke OK: http://${LB}:8000"
+          kubectl -n pytstop port-forward service/pytstop-api 18000:8000 \
+            >/tmp/pytstop-api-port-forward.log 2>&1 &
+          port_forward_pid=$!
+          trap 'kill "$port_forward_pid" 2>/dev/null || true' EXIT
+
+          for _ in {1..30}; do
+            if curl --fail --silent --max-time 5 \
+              http://127.0.0.1:18000/api/v1/saude >/dev/null; then
               exit 0
             fi
-            sleep 10
+            sleep 2
           done
-          kubectl -n pytstop logs deploy/pytstop-api --tail=50 || true
+
+          cat /tmp/pytstop-api-port-forward.log
           exit 1
       # Job verde sem deploy nenhum e silencioso demais — o notice deixa o
       # motivo visivel no summary do run.

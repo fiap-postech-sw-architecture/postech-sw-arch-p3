@@ -186,7 +186,7 @@ Passo a passo manual, portas completas (inclui Loki 3100), validação do HPA so
 
 ## Deploy na nuvem (EKS)
 
-O alvo cloud usa os **mesmos manifests base** de `k8s/` com o overlay kustomize [`k8s/overlays/eks/`](k8s/overlays/eks/kustomization.yaml) ([ADR-030](docs/arquitetura/adr/fase3/030-cluster-kubernetes-eks.md)): imagens via GHCR (as mesmas que o CI publica por SHA), API exposta por Service `LoadBalancer` (endpoint que o API Gateway consome), `DATABASE_URL` apontando para o RDS via Secret `postgres-credentials` e **sem** metrics-server local (no EKS ele vem do provisionamento do cluster). Render local:
+O alvo cloud usa os **mesmos manifests base** de `k8s/` com o overlay kustomize [`k8s/overlays/eks/`](k8s/overlays/eks/kustomization.yaml) ([ADR-030](docs/arquitetura/adr/fase3/030-cluster-kubernetes-eks.md)): imagens via GHCR (as mesmas que o CI publica por SHA), API atrás de um NLB interno consumido pelo API Gateway via VPC Link, `DATABASE_URL` apontando para o RDS via Secret `postgres-credentials` e **sem** metrics-server local (no EKS ele vem do provisionamento do cluster). Render local:
 
 ```bash
 kubectl kustomize --load-restrictor=LoadRestrictionsNone k8s/overlays/eks
@@ -197,11 +197,11 @@ kubectl kustomize --load-restrictor=LoadRestrictionsNone k8s/overlays/eks
 ```
 1. p3-infra-db    →  RDS no ar (endpoint + credenciais)
 2. p3-infra-k8s   →  EKS no ar (kubeconfig)
-3. p3-lambda      →  gateway + Lambdas (a function precisa do endpoint do banco)
-4. p3 (este repo) →  migração + deploy da aplicação no EKS (cd.yml, job deploy-eks)
+3. p3 (este repo) →  migração + deploy no EKS e criação do NLB interno
+4. p3-lambda      →  gateway + Lambdas + VPC Link (exige o ARN do listener)
 ```
 
-As credenciais AWS Academy são rotativas (~4h por sessão): os GitHub Secrets são re-gravados a cada *Start Lab* e o `terraform destroy` pós-demo é obrigatório — runbook `aws-academy-setup.md` no repo [p3-docs](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-docs).
+As credenciais AWS Academy são rotativas (~4h por sessão): os GitHub Secrets são re-gravados a cada *Start Lab*. A infraestrutura pode permanecer durante a preparação e gravação, por no máximo sete dias, mas EKS, NLB e VPC Link devem ser destruídos ao final porque não possuem pausa sem cobrança — runbook `aws-academy-setup.md` no repo [p3-docs](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-docs).
 
 ## CI/CD
 
@@ -221,7 +221,7 @@ Atualização de dependências automatizada por [Dependabot](.github/dependabot.
 
 ## API
 
-Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose, `http://localhost:18000/docs` via port-forward do cluster (na nuvem, o `/docs` responde no endpoint do LoadBalancer/gateway).
+Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose e `http://localhost:18000/docs` via port-forward do cluster. Na AWS, o NLB da API é interno e não expõe `/docs` diretamente à internet.
 
 | Grupo | Prefixo | Operações |
 |---|---|---|
@@ -229,6 +229,7 @@ Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose
 | Serviços | /api/v1/servicos | CRUD catálogo |
 | Estoque | /api/v1/estoque | CRUD + ajuste de quantidade |
 | Ordens de Serviço | /api/v1/ordens-de-servico | Criação com serviços e peças, listagem ordenada por prioridade, ciclo completo da OS |
+| Ordens do Cliente | /api/v1/minhas-ordens | Lista e consulta somente as ordens do cliente autenticado pela Lambda |
 | Autenticação | /api/v1/autenticacao | Login interno, registro, refresh, logout (a autenticação de **clientes por CPF** entra pela borda serverless — [ADR-028](docs/arquitetura/adr/fase3/028-autenticacao-serverless-cpf.md)) |
 | Público | /api/v1/acompanhamento · /api/v1/publico/.../decisao-orcamento | Acompanhamento por placa + documento e decisão externa de orçamento via assinatura HMAC |
 | Admin / Outbox | /api/v1/admin/outbox | Operação da Transactional Outbox/DLQ, role `admin` |

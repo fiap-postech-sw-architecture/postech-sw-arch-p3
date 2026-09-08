@@ -88,4 +88,24 @@ Adotar o **Amazon API Gateway, no modo HTTP API**, como o gateway da fase 3:
 
 O `sam local start-api` (SAM CLI >= 1.80) suporta Lambda authorizer, detalhe ausente do material da disciplina e não verificado quando este ADR aceitou a paridade local "parcial" (roteamento e authorizer sem emulação). Com isso, a rota protegida do gateway também é demonstrável localmente; comportamento provado ao vivo no gateway emulado: 401 sem token, 403 com token adulterado (deny do authorizer), e o token válido alcança o handler (o par discriminante 401×403 do HTTP API). O desenho de produção não muda; muda o alcance da demo sem AWS. Detalhes e reavaliação do LocalStack no [Adendo do ADR-029](029-emulacao-local-lambda.md#adendo-2026-07-11--authorizer-local-via-sam-e-reavaliação-do-localstack).
 
+## Adendo (2026-09-07) — integração privada com o EKS
+
+O incremento atual publica no Gateway `POST /auth`,
+`GET /api/v1/minhas-ordens` e
+`GET /api/v1/minhas-ordens/{ordem_id}`, sem adicionar as rotas públicas citadas
+na decisão original. As rotas protegidas usam integração privada `HTTP_PROXY`
+por um VPC Link até o listener TCP `8000` de um NLB interno. O Service
+Kubernetes deixa de publicar um endpoint de aplicação acessível pela internet.
+
+O Terraform do repositório `postech-sw-arch-p3-lambda` recebe o ARN do listener
+por `app_listener_arn`, cria o VPC Link nas duas subnets privadas e sobrescreve
+o caminho da integração com `"overwrite:path" = "$request.path"`. Um security
+group sem entrada permite somente saída TCP `8000` para a VPC. A mesma
+integração privada atende as duas rotas `GET` de cliente. Essa sobrescrita
+impede que os nomes dos stages `homolog` e `prod` cheguem ao FastAPI.
+
+O template SAM atual emula apenas `POST /auth`; a evidência da rota protegida no
+adendo de 2026-07-11 é histórica. O authorizer continua coberto por pytest, e a
+validação redundante no app e o modelo HTTP API permanecem inalterados.
+
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

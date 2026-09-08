@@ -13,6 +13,7 @@ from src.autenticacao.infraestrutura.jwt_service import JWTService
 from src.autenticacao.interfaces.middleware import (
     _PERMISSOES,
     exigir_papel,
+    obter_cliente_id_atual,
     obter_usuario_atual,
 )
 
@@ -157,6 +158,7 @@ class TestHierarquiaDePapeis:
             pytest.param("admin", "mecanico", id="admin-acessa-mecanico"),
             pytest.param("atendente", "atendente", id="atendente-acessa-atendente"),
             pytest.param("mecanico", "mecanico", id="mecanico-acessa-mecanico"),
+            pytest.param("cliente", "cliente", id="cliente-acessa-cliente"),
         ],
     )
     def test_papel_aceito(self, papel_usuario: str, papel_exigido: str) -> None:
@@ -171,6 +173,9 @@ class TestHierarquiaDePapeis:
             pytest.param("atendente", "mecanico", id="atendente-nega-mecanico"),
             pytest.param("mecanico", "admin", id="mecanico-nega-admin"),
             pytest.param("mecanico", "atendente", id="mecanico-nega-atendente"),
+            pytest.param("cliente", "admin", id="cliente-nega-admin"),
+            pytest.param("cliente", "atendente", id="cliente-nega-atendente"),
+            pytest.param("cliente", "mecanico", id="cliente-nega-mecanico"),
         ],
     )
     def test_papel_nao_herda_para_cima_ou_lateral(
@@ -179,6 +184,13 @@ class TestHierarquiaDePapeis:
         verificar = exigir_papel(papel_exigido)
         with pytest.raises(HTTPException) as exc:
             verificar({"papel": papel_usuario, "sub": "u1"})  # type: ignore[operator]
+        assert exc.value.status_code == 403
+
+    @pytest.mark.parametrize("papel", ["admin", "atendente", "mecanico"])
+    def test_papel_interno_nao_acessa_cliente(self, papel: str) -> None:
+        verificar = exigir_papel("cliente")
+        with pytest.raises(HTTPException) as exc:
+            verificar({"papel": papel, "sub": "u1"})
         assert exc.value.status_code == 403
 
 
@@ -225,6 +237,21 @@ class TestEdgeCasesExigirPapel:
     def test_exigir_papel_com_valor_fora_do_enum_levanta_value_error(self) -> None:
         with pytest.raises(ValueError, match="papel invalido"):
             exigir_papel("admin", "desconhecido")
+
+
+class TestObterClienteIdAtual:
+    def test_converte_sub_em_uuid(self) -> None:
+        cliente_id = uuid4()
+        assert (
+            obter_cliente_id_atual({"sub": str(cliente_id), "papel": "cliente"})
+            == cliente_id
+        )
+
+    @pytest.mark.parametrize("sub", [None, "", "nao-e-uuid", 42])
+    def test_sub_invalido_retorna_401(self, sub: object) -> None:
+        with pytest.raises(HTTPException) as exc:
+            obter_cliente_id_atual({"sub": sub, "papel": "cliente"})
+        assert exc.value.status_code == 401
 
 
 class TestGuardasDePermissoes:

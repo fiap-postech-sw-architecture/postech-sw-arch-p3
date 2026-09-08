@@ -35,6 +35,11 @@ class TestMain:
         assert any("/api/v1/ordens-de-servico" in p for p in paths)
         assert any("/api/v1/autenticacao" in p for p in paths)
 
+    def test_rotas_de_cliente_estao_no_openapi(self) -> None:
+        schema = TestClient(criar_app()).get("/openapi.json").json()
+        assert "/api/v1/minhas-ordens" in schema["paths"]
+        assert "/api/v1/minhas-ordens/{ordem_id}" in schema["paths"]
+
     def test_versao(self) -> None:
         from importlib.metadata import version
 

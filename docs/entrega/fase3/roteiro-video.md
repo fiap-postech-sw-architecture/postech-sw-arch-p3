@@ -121,13 +121,15 @@ kubectl --context kind-pytstop -n pytstop port-forward svc/pytstop-api 18000:800
 
 Sequência gravada:
 
-1. **Sem token → barrado**: `curl -si http://localhost:18000/api/v1/ordens-de-servico/ | head -1` → **401**.
-2. **Token do cliente (bloco 2) aceito pelo validador do app** (RN-021 — mesmo segredo, mesmos claims): `curl -si -H "Authorization: Bearer $TOKEN" http://localhost:18000/api/v1/ordens-de-servico/ | head -1` → **403** (assinatura aceita; o RBAC nega a rota interna ao papel `cliente` — defense in depth). No caminho AWS, a rota protegida de exemplo do gateway responde **200** com o token e **401** sem ele, barrando na borda pelo authorizer.
-3. **Fluxo de negócio com usuário interno**: Swagger em **http://localhost:18000/docs** → `POST /api/v1/autenticacao/login` (`admin@pytstop.dev` / senha de demo) → **Authorize** → `POST /api/v1/ordens-de-servico/` com serviços e peças → **201** com id; `GET` do id → `situacao` no vocabulário do challenge.
+1. **Autenticação do cliente**: `POST /auth` com CPF ativo → **200** e salvar o `access_token` em `$TOKEN`.
+2. **Sem token → barrado na borda**: `GET /api/v1/minhas-ordens` → **401/403** no API Gateway.
+3. **Token do cliente → somente suas ordens**: `GET /api/v1/minhas-ordens` com `Authorization: Bearer $TOKEN` → **200**.
+4. **Isolamento entre clientes**: `GET /api/v1/minhas-ordens/{ordem_id}` com o id de outro cliente → **404**.
+5. **Fluxo de negócio com usuário interno**: Swagger em **http://localhost:18000/docs** → `POST /api/v1/autenticacao/login` (`admin@pytstop.dev` / senha de demo) → **Authorize** → `POST /api/v1/ordens-de-servico/` com serviços e peças → **201** com id; `GET` do id → `situacao` no vocabulário do challenge.
 
-**Fala**: "O mesmo validador atende os dois emissores: o token do cliente emitido pela lambda passa na assinatura e cai no controle de papel, e o usuário interno opera o fluxo completo de OS — token inválido nem chega ao app quando o gateway está na frente."
+**Fala**: "O token emitido pela Lambda identifica o cliente. O authorizer bloqueia a requisição sem token na borda e o app revalida o papel e o identificador, sempre filtrando as ordens pelo cliente autenticado."
 
-**Evidência no ar**: 401 sem token; 403/200 com o token da lambda (conforme o caminho); 201 + `situacao` no fluxo interno.
+**Evidência no ar**: 200 com `access_token`; 401/403 sem token; 200 na lista do cliente; 404 ao consultar ordem de outro cliente; 201 + `situacao` no fluxo interno.
 
 ### 6. Dashboard Grafana ao vivo (2min30s)
 

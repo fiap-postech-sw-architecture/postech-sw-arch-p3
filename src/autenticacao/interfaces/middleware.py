@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Annotated
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -87,6 +88,7 @@ _PERMISSOES: MappingProxyType[Papel, frozenset[Papel]] = MappingProxyType(
         Papel.ADMIN: frozenset({Papel.ADMIN, Papel.ATENDENTE, Papel.MECANICO}),
         Papel.ATENDENTE: frozenset({Papel.ATENDENTE}),
         Papel.MECANICO: frozenset({Papel.MECANICO}),
+        Papel.CLIENTE: frozenset({Papel.CLIENTE}),
     }
 )
 
@@ -127,3 +129,16 @@ def exigir_papel(
         return usuario
 
     return verificar
+
+
+def obter_cliente_id_atual(
+    usuario: Annotated[dict[str, object], Depends(exigir_papel(Papel.CLIENTE.value))],
+) -> UUID:
+    try:
+        return UUID(str(usuario.get("sub")))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token sem identificador de cliente valido",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from None

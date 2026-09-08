@@ -7,3 +7,4 @@ class Papel(StrEnum):
     ADMIN = "admin"
     MECANICO = "mecanico"
     ATENDENTE = "atendente"
+    CLIENTE = "cliente"

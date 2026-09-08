@@ -33,8 +33,10 @@ from src.ordem_servico.aplicacao.use_cases import (
     GerarOrcamentoComplementar,
     IniciarDiagnostico,
     ListarOrdens,
+    ListarOrdensDoCliente,
     ObterMetricas,
     ObterOrdem,
+    ObterOrdemDoCliente,
     RegistrarEntrega,
     RejeitarOrcamentoComplementar,
     RemoverItem,
@@ -182,9 +184,17 @@ def obter_listar_ordens(session: Session) -> ListarOrdens:
     return ListarOrdens(repo=_repo(session))
 
 
+def obter_listar_ordens_do_cliente(session: Session) -> ListarOrdensDoCliente:
+    return ListarOrdensDoCliente(repo=_repo(session))
+
+
 def obter_obter_ordem(session: Session) -> ObterOrdem:
     """Wires ``ObterOrdem`` (query-only, no UoW)."""
     return ObterOrdem(repo=_repo(session))
+
+
+def obter_ordem_do_cliente(session: Session) -> ObterOrdemDoCliente:
+    return ObterOrdemDoCliente(repo=_repo(session))
 
 
 def obter_metricas(session: Session) -> ObterMetricas:

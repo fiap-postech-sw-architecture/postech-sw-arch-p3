@@ -2258,6 +2258,125 @@
     }
    }
   },
+  "/api/v1/minhas-ordens": {
+   "get": {
+    "tags": [
+     "minhas-ordens"
+    ],
+    "summary": "Lista as ordens do cliente autenticado",
+    "operationId": "listar_minhas_ordens_api_v1_minhas_ordens_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "default": 0,
+       "title": "Offset"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 100,
+       "minimum": 1,
+       "default": 20,
+       "title": "Limit"
+      }
+     },
+     {
+      "name": "incluir_encerradas",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "title": "Incluir Encerradas"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemListaResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/minhas-ordens/{ordem_id}": {
+   "get": {
+    "tags": [
+     "minhas-ordens"
+    ],
+    "summary": "Consulta uma ordem do cliente autenticado",
+    "operationId": "obter_minha_ordem_api_v1_minhas_ordens__ordem_id__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ordem_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Ordem Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OrdemDeServicoResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/v1/autenticacao/login": {
    "post": {
     "tags": [
@@ -3646,15 +3765,6 @@
     "title": "OrdemResumoResponse",
     "description": "Projecao enxuta para listagens paginadas."
    },
-   "Papel": {
-    "type": "string",
-    "enum": [
-     "admin",
-     "mecanico",
-     "atendente"
-    ],
-    "title": "Papel"
-   },
    "PecaDaOrdemRequest": {
     "properties": {
      "servico_catalogo_id": {
@@ -3714,7 +3824,13 @@
       "title": "Senha"
      },
      "papel": {
-      "$ref": "#/components/schemas/Papel"
+      "type": "string",
+      "enum": [
+       "admin",
+       "mecanico",
+       "atendente"
+      ],
+      "title": "Papel"
      }
     },
     "additionalProperties": false,
