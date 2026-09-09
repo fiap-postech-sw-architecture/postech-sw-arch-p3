@@ -10,6 +10,7 @@ Updated by AI agents at task end per `postech-ai-helper/ai/canonical/task-end-re
 
 ## Recent decisions
 
+- 2026-09-09 - Branch protection: a entrada de 2026-09-07 abaixo esta ERRADA — verificacao com conta admin (jbamaral) mostra a protecao ATIVA nos 5 repos desde 2026-09-03 (PR obrigatorio, admins incluidos, checks). Endpoints de protection respondem 404 para quem tem so `write`. Adendo (h) do ADR-033 registra; entrega/README/RFC-003 corrigidos. Convites de colaborador (leitura) para `soat-architecture` enviados nos 5 repos em 2026-09-09 (201 Created; ate entao nao havia convite nem colaboracao — o 'acesso confirmado' de 07/09 era so a visibilidade publica). `scripts/build-entrega-pdf.sh` reescrito para a fase 3: capa ABNT, strip da §9, Anexo A = scan-fase-3.md, Anexo B = evidencias (runs do CD de 07/09, SonarQube, ZAP); placeholder de video => sufixo -DRAFT no PDF e aviso na capa.
 - 2026-09-07 - CORRECAO do estado de branch protection: consultas REST e GraphQL nao encontraram protecao ou rulesets nos cinco repos; `Gryog` tem `write`, mas nao `admin`, e o PUT de protection retorna 404. Repos publicos tornam o recurso disponivel no plano free, mas um administrador ainda precisa ativa-lo. Ate la, PR + checks + aprovacao manual permanecem obrigatorios por convencao. Supersede somente a afirmacao de ativacao da entrada de 2026-09-03
 - 2026-09-07 - Deploy automatico de producao comprovado na ordem RDS → EKS → app → Lambda pelos runs 34177626665, 34178105568, 34178566291 e 34179043515; smoke externo do Gateway confirmou auth 200, rota protegida 200 e sem token 401
 - 2026-09-07 - O overlay EKS publica `pytstop-api` por NLB interno com cross-zone; o CD valida a API por `kubectl port-forward`, pois o balanceador não possui endpoint público
@@ -34,6 +35,7 @@ Updated by AI agents at task end per `postech-ai-helper/ai/canonical/task-end-re
 
 ## Gotchas
 
+- 2026-09-09 - `GET`/`PUT /repos/{o}/{r}/branches/main/protection` retornam 404 para usuario sem `admin` MESMO com protecao ativa (falso negativo que virou o Adendo (g)); `gh api repos/{o}/{r}/branches/main --jq .protected` e visivel a qualquer leitor. Antes de afirmar 'sem protecao', confira esse campo ou peça a um admin.
 - 2026-09-07 - Renovar/iniciar uma sessão do Learner Lab pode parar as EC2 existentes do managed node group; o EKS persiste e o Auto Scaling substitui os nodes, mas pods e targets do NLB ficam indisponíveis por alguns minutos. Antes do smoke, aguardar 2 nodes `Ready`, deployments `Available` e zero targets unhealthy
 - 2026-09-07 - Build local no Mac ARM publica imagem GHCR `linux/arm64`, incompatível com nodes EKS `x86_64`; publicação manual para o EKS deve usar `docker buildx build --platform linux/amd64 --push` e confirmar o manifesto com `docker buildx imagetools inspect`
 - 2026-09-07 - A policy `voc-cancel-cred` do Learner Lab nega leituras como `lambda:GetFunctionConfiguration` e `apigateway:GET /vpclinks` mesmo após permitir o Terraform criar os recursos; validar com `terraform plan` sem drift e smoke real pelo endpoint do Gateway

@@ -205,7 +205,7 @@ As credenciais AWS Academy são rotativas (~4h por sessão): os GitHub Secrets s
 
 ## CI/CD
 
-Padrão da fase 3 ([ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)): deploy automático por branch — push em **`homolog`** implanta no ambiente **homologação**; push em **`main`**, em **produção**. PRs são obrigatórios por convenção; a proteção técnica da `main` depende de permissão administrativa no GitHub.
+Padrão da fase 3 ([ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)): deploy automático por branch — push em **`homolog`** implanta no ambiente **homologação**; push em **`main`**, em **produção**. `main` protegida (PR obrigatório, checks de CI e Security) desde 03/09/2026 — Adendos (e) e (h) do ADR-033.
 
 | Workflow | Trigger | O que faz |
 |---|---|---|
@@ -217,7 +217,7 @@ Padrão da fase 3 ([ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md))
 
 Atualização de dependências automatizada por [Dependabot](.github/dependabot.yml) (uv, github-actions, docker), mensal e agrupada por ecossistema.
 
-> Pipelines em execução no GitHub Actions desde 01/08/2026. O [CD de produção de 07/09/2026](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/actions/runs/34178566291) publicou as imagens e concluiu os deploys no kind e no EKS. A `main` ainda não possui proteção técnica porque a conta operacional tem `write`, mas não `admin`; PR, checks e aprovação manual permanecem obrigatórios por convenção ([ADR-033, Adendo (g)](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md#g-correção-do-estado-da-branch-protection-2026-09-07)).
+> Pipelines em execução no GitHub Actions desde 01/08/2026. O [CD de produção de 07/09/2026](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/actions/runs/34178566291) publicou as imagens e concluiu os deploys no kind e no EKS. A `main` é protegida desde 03/09/2026: PR obrigatório, checks de CI e Security ([ADR-033, Adendos (e) e (h)](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)). O gate local espelho (`make check` e `make cd-local`) continua como pré-check antes de cada push.
 
 ## API
 
@@ -242,7 +242,7 @@ Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose
 | Documentação de arquitetura (ADRs 026–033, RFC-003, gap analysis) | ✅ completa |
 | Manifests k8s + stack de monitoramento no kind | ✅ no ar localmente (`make cd-local`) |
 | Overlay EKS + pipeline homolog/produção | ✅ commitados ([`k8s/overlays/eks/`](k8s/overlays/eks/kustomization.yaml), [`cd.yml`](.github/workflows/cd.yml)) |
-| Execução dos pipelines no GitHub Actions | ✅ CI completo e [CD de produção](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/actions/runs/34178566291) verdes; proteção técnica da `main` pendente de permissão `admin` |
+| Execução dos pipelines no GitHub Actions | ✅ CI completo e [CD de produção](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/actions/runs/34178566291) verdes; `main` protegida (PR + checks) desde 03/09/2026, verificada em 09/09/2026 |
 | Provisionamento EKS/RDS/gateway na AWS | ✅ RDS, EKS, NLB interno, Lambda, API Gateway e VPC Link validados em `us-east-1` |
 | Vídeo de demonstração e PDF da entrega | ⏳ pendentes — passo a passo na issue de fechamento da fase 3 ([#16](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/issues/16)) |
 
