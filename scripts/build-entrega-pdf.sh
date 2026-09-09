@@ -80,7 +80,9 @@ cat > "$COMBINADO" <<CAPA
   /* Diagrama de componentes em pagina paisagem: o flowchart e largo e, em
      retrato, o texto dos nos fica ilegivel. */
   @page paisagem { size: A4 landscape; margin: 1.2cm; }
-  .paisagem { page: paisagem; break-before: page; break-after: page; }
+  /* O CSS default do pandoc limita o body a 36em centralizado; a div sai
+     desse limite (largura fixa + margem negativa) para ocupar a paisagem. */
+  .paisagem { page: paisagem; break-before: page; break-after: page; width: 26cm; margin-left: -5.4cm; }
 </style>
 
 <div style="text-align:center; min-height:23cm; display:flex; flex-direction:column; justify-content:space-between; break-after:page;">
