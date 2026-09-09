@@ -155,4 +155,10 @@ checks: app (`lint`, `type-check`, `security`, `test`, `sbom`, `pip-audit`,
 `gitleaks`, `trivy`), Lambda (`gate`, `tf-validate`) e infra (`gate`). O
 `ci-plan` não é obrigatório porque o workflow ignora alterações documentais.
 
+### (h) Verificação da branch protection com conta administradora (2026-09-09)
+
+A consulta que motivou (g) foi feita com a conta `Gryog`, que tem `write`: os endpoints de branch protection respondem 404 para quem não é `admin`, mesmo com a proteção ativa, e a tentativa de `PUT` recebe o mesmo 404. Verificação em 09/09/2026 com a conta administradora (`jbamaral`): a proteção da `main` está **ativa nos cinco repositórios desde 03/09/2026**, como registrado em (e) — PR obrigatório, sem commit direto (administradores incluídos), zero aprovações e os checks listados em (g) (`ci-plan` fora, pelo `paths-ignore`). O campo `protected` de `GET /repos/{org}/{repo}/branches/main` é visível a qualquer leitor e confirma o estado sem exigir `admin`.
+
+Fica sem efeito a correção de (g). Os deploys de 07/09/2026 passaram pela proteção: todos via PR com checks verdes. Também em 09/09/2026 o usuário `soat-architecture` recebeu convite de colaborador de leitura nos cinco repositórios.
+
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

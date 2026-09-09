@@ -366,7 +366,7 @@ O acompanhamento público por placa+documento (`router_publico.py`) permanece co
 
 ## 6. Fluxo de deploy multi-repo (CI/CD)
 
-Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)): `ci.yml` com os gates adequados ao conteúdo e `cd.yml` com deploy automático por branch — push em **`homolog` → ambiente de homologação**; push em **`main` → produção**. PR e checks são obrigatórios por convenção. A proteção técnica da `main` está pendente de uma conta com permissão administrativa, conforme o [Adendo (g) do ADR-033](../../adr/fase3/033-cicd-multi-repo.md#g-correção-do-estado-da-branch-protection-2026-09-07).
+Padrão uniforme por repositório ([ADR-033](../../adr/fase3/033-cicd-multi-repo.md)): `ci.yml` com os gates adequados ao conteúdo e `cd.yml` com deploy automático por branch — push em **`homolog` → ambiente de homologação**; push em **`main` → produção**. PR e checks são obrigatórios, com proteção técnica da `main` ativa desde 03/09/2026 (Adendos (e) e (h) do [ADR-033](../../adr/fase3/033-cicd-multi-repo.md)).
 
 | Repo | `ci.yml` | `cd.yml` |
 |---|---|---|
