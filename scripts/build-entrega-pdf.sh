@@ -182,7 +182,10 @@ for n, m in enumerate(blocos, 1):
     open(f"{tmp}/diagrama-{n}.mmd", "w", encoding="utf-8").write(m.group(1))
     src = src.replace(
         m.group(0),
-        f'<div class="paisagem">\n\n![Diagrama {n} — ver fonte Mermaid no repositório]({tmp}/diagrama-{n}.png)\n\n</div>',
+        # <img> cru com width:100%: a imagem markdown herda o DPI gravado no PNG
+        # (escala 2 do mermaid-cli) e sai com metade da largura da pagina.
+        f'<div class="paisagem">\n\n<img src="{tmp}/diagrama-{n}.png" alt="Diagrama {n}" style="width:100%; display:block;"/>\n\n'
+        f'<p><em>Diagrama {n} — fonte Mermaid na RFC-003 §4 e na seção 7 do documento no repositório.</em></p>\n\n</div>',
     )
 open(md, "w", encoding="utf-8").write(src)
 EOF
