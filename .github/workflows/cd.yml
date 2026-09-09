@@ -203,9 +203,10 @@ jobs:
   # Deploy cloud no EKS (ADR-030/ADR-033): overlay k8s/overlays/eks sobre o
   # cluster provisionado pelo repo p3-infra-k8s, banco no RDS do p3-infra-db.
   # `environment` mapeia a branch ao ambiente exigido pelo challenge
-  # (homolog -> homologacao, main -> producao). Sem os secrets AWS gravados
-  # (sessao do Academy fechada), todos os passos viram no-op e o job termina
-  # verde — o kind (job `deploy`) segue validando o fluxo.
+  # (homolog -> homologacao, main -> producao). Sem secrets AWS gravados, ou
+  # com o token do Academy vencido (sessao encerrada), todos os passos viram
+  # no-op com aviso e o job termina verde — o kind (job `deploy`) segue
+  # validando o fluxo.
   deploy-eks:
     needs: image
     runs-on: ubuntu-latest
@@ -217,10 +218,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # O contexto `secrets` nao existe em `if` de job — o gate vira output
-      # de step. Secrets ausentes = sessao do Academy fechada = pular a AWS.
+      # de step. Secrets ausentes OU vencidos (o token do Learner Lab dura
+      # ~4h e fica gravado depois que a sessao acaba) = pular a AWS com aviso.
+      # A validacao e um `sts get-caller-identity` com as credenciais so em
+      # env; nada do retorno e impresso.
       - id: aws
         name: Check AWS credentials
-        run: echo "enabled=${{ secrets.AWS_ACCESS_KEY_ID != '' }}" >> "$GITHUB_OUTPUT"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        run: |
+          if [ -z "${AWS_ACCESS_KEY_ID}" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "motivo=secrets AWS ausentes" >> "$GITHUB_OUTPUT"
+          elif aws sts get-caller-identity --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "motivo=credenciais AWS vencidas ou invalidas (sessao do Academy encerrada)" >> "$GITHUB_OUTPUT"
+          fi
       # Credenciais rotativas do Academy (access key + secret + session
       # token), re-gravadas a cada Start Lab — runbook aws-academy-setup.md
       # (repo p3-docs). OIDC e inviavel no Learner Lab (ADR-033).
@@ -319,4 +336,4 @@ jobs:
       # motivo visivel no summary do run.
       - if: steps.aws.outputs.enabled != 'true'
         name: Notice (deploy skipped)
-        run: echo "::notice::deploy EKS pulado — secrets AWS ausentes (sessão Academy fechada)"
+        run: echo "::notice::deploy EKS pulado — ${{ steps.aws.outputs.motivo }}"
