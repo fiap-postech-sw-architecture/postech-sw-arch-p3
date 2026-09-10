@@ -108,4 +108,16 @@ O template SAM atual emula apenas `POST /auth`; a evidência da rota protegida n
 adendo de 2026-07-11 é histórica. O authorizer continua coberto por pytest, e a
 validação redundante no app e o modelo HTTP API permanecem inalterados.
 
+## Adendo (2026-09-10) — subnets da function de autenticação
+
+A function `autenticacao_cpf` roda nas subnets `default-for-az` da VPC do
+Learner Lab, enquanto o VPC Link usa as duas subnets privadas do
+PytStop. A escolha está travada por teste do Terraform e tem dois motivos.
+As subnets `default-for-az` existem em todas as zonas de disponibilidade
+desde a criação da conta e não dependem do Terraform do `p3-infra-k8s`, que
+cria as privadas. A function precisa apenas de saída para o RDS na porta
+5432, dentro da VPC. A exposição não muda com a subnet: uma function em VPC
+nunca recebe IP público. A assimetria fica registrada para que uma futura
+rodada de infraestrutura decida se vale unificar tudo nas subnets privadas.
+
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

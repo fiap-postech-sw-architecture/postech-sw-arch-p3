@@ -1,0 +1,82 @@
+# Smoke fase 3 via newman — 10/09/2026, stack completa no kind (make cd-local, cluster kind-pytstop)
+# Comando: npx newman run <pasta '00 - Smoke fase 3 (newman)' da postman-collection-fase3.json> --env-var baseUrl=http://127.0.0.1:18000 --env-var admin_password=<ADMIN_PASSWORD do k8s/secret.yaml, valor de demonstracao>
+# O passo bonus '11 Lambda /auth (SAM local)' ficou fora desta rodada (SAM nao foi levantado nesta sessao); os 10 passos restantes rodaram contra a API no kind.
+
+PytStop — Fase 3 (API + autenticacao serverless)
+
+❏ 00 - Smoke fase 3 (newman)
+↳ 01 Login admin
+  POST http://127.0.0.1:18000/api/v1/autenticacao/login [200 OK, 1.03kB, 301ms]
+  ✓  login 200
+  ✓  access_token presente
+  ✓  refresh_token presente
+
+↳ 02 Refresh (rotaciona par de tokens)
+  POST http://127.0.0.1:18000/api/v1/autenticacao/refresh [200 OK, 1.03kB, 13ms]
+  ✓  refresh 200
+  ✓  novo access_token presente
+
+↳ 03 Criar cliente (CPF gerado no pre-request)
+  POST http://127.0.0.1:18000/api/v1/clientes [201 Created, 611B, 13ms]
+  ✓  cliente criado 201
+  ✓  cliente tem id
+
+↳ 04 Criar veiculo do cliente (placa gerada no pre-request)
+  POST http://127.0.0.1:18000/api/v1/clientes/39c7e12b-eaa4-4d83-9abe-bf4a4f7e6913/veiculos [201 Created, 490B, 9ms]
+  ✓  veiculo criado 201
+  ✓  veiculo tem id
+
+↳ 05 Listar catalogo de servicos
+  GET http://127.0.0.1:18000/api/v1/servicos [200 OK, 1.16kB, 8ms]
+  ✓  servicos 200
+  ✓  catalogo nao vazio
+  ✓  ha servico ativo
+
+↳ 06 Listar estoque
+  GET http://127.0.0.1:18000/api/v1/estoque [200 OK, 1.42kB, 8ms]
+  ✓  estoque 200
+  ✓  estoque nao vazio
+  ✓  ha item ativo com saldo
+
+↳ 07 Criar ordem de servico (com servico + peca)
+  POST http://127.0.0.1:18000/api/v1/ordens-de-servico [201 Created, 1.35kB, 14ms]
+  ✓  OS criada 201
+  ✓  OS tem id
+  ✓  status recebida
+  ✓  OS tem itens
+
+↳ 08 Iniciar diagnostico (RECEBIDA -> EM_DIAGNOSTICO)
+  POST http://127.0.0.1:18000/api/v1/ordens-de-servico/c75dda6e-1faa-4bff-b292-3c26b6e818b1/diagnostico [200 OK, 1.36kB, 10ms]
+  ✓  diagnostico 200
+  ✓  status em_diagnostico
+
+↳ 09 Gerar orcamento (EM_DIAGNOSTICO -> AGUARDANDO_APROVACAO)
+  POST http://127.0.0.1:18000/api/v1/ordens-de-servico/c75dda6e-1faa-4bff-b292-3c26b6e818b1/orcamento [200 OK, 1.65kB, 7ms]
+  ✓  orcamento 200
+  ✓  status aguardando_aprovacao
+  ✓  orcamento calculado
+
+↳ 10 Aprovar orcamento (AGUARDANDO_APROVACAO -> EM_EXECUCAO)
+  POST http://127.0.0.1:18000/api/v1/ordens-de-servico/c75dda6e-1faa-4bff-b292-3c26b6e818b1/aprovacao [200 OK, 1.63kB, 8ms]
+  ✓  aprovacao 200
+  ✓  status em_execucao
+
+┌─────────────────────────┬───────────────────┬──────────────────┐
+│                         │          executed │           failed │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│              iterations │                 1 │                0 │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│                requests │                10 │                0 │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│            test-scripts │                10 │                0 │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│      prerequest-scripts │                 2 │                0 │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│              assertions │                26 │                0 │
+├─────────────────────────┴───────────────────┴──────────────────┤
+│ total run duration: 504ms                                      │
+├────────────────────────────────────────────────────────────────┤
+│ total data received: 8.03kB (approx)                           │
+├────────────────────────────────────────────────────────────────┤
+│ average response time: 39ms [min: 7ms, max: 301ms, s.d.: 87ms] │
+└────────────────────────────────────────────────────────────────┘

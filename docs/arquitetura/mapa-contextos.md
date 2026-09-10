@@ -21,6 +21,9 @@ graph LR
     subgraph Generico
         A[Autenticacao<br/><i>Generico</i>]
     end
+    subgraph Serverless["Fora do monolito (fase 3)"]
+        L[Lambda de autenticacao por CPF<br/><i>Generico, serverless</i>]
+    end
 
     C -->|Cliente-Fornecedor + ACL| OS
     CS -->|Cliente-Fornecedor + ACL| OS
@@ -29,6 +32,7 @@ graph LR
     A -.->|middleware| C
     A -.->|middleware| CS
     A -.->|middleware| E
+    C -.->|leitura direta de clientes - shared database, ADR-028| L
 ```
 
 > Direção das setas: fornecedor → consumidor (upstream → downstream).

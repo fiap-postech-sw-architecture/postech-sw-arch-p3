@@ -121,10 +121,10 @@ erDiagram
         uuid cliente_id FK
         uuid veiculo_id FK
         varchar status
-        jsonb orcamento
+        jsonb orcamento_json
         jsonb escopo_aprovado_json
-        timestamp criado_em
-        timestamp atualizado_em
+        timestamptz criado_em
+        timestamptz atualizado_em
     }
     itens_da_ordem {
         uuid id PK
@@ -187,7 +187,7 @@ erDiagram
     outbox ||--o{ processed_events : "idempotencia por handler"
 ```
 
-Relacionamentos: as FKs cross-contexto (`cliente_id`, `veiculo_id`) seguem o trade-off consciente da RFC-001 (integridade referencial do PostgreSQL num monolito com banco único); `servico_catalogo_id` e `item_estoque_id` em `itens_da_ordem` são referências lógicas sem `FOREIGN KEY` (o consumidor valida pela porta do contexto vizinho; índice em `item_estoque_id` para a consulta cross-contexto). `consentimentos` guarda o consentimento LGPD por cliente (`tipo`, concessão e revogação), com remoção em cascata. `outbox` e `processed_events` não têm FK para as tabelas de negócio de propósito — `agregado_id` é referência lógica ao agregado emissor, e `processed_events` garante idempotência de entrega por `(outbox_id, handler)` (PK composta desde a migração `008`). O JSONB em `orcamento`, `escopo_aprovado_json` e `payload` é o recurso específico do PostgreSQL que ancora a justificativa formal do banco ([ADR-031](../../adr/fase3/031-banco-gerenciado-rds.md)). A Lambda de autenticação lê apenas `clientes` (colunas `documento_hash` — HMAC-SHA256 determinístico do documento, único — e `ativo`; `documento` em si fica cifrado com Fernet).
+Relacionamentos: as FKs cross-contexto (`cliente_id`, `veiculo_id`) seguem o trade-off consciente da RFC-001 (integridade referencial do PostgreSQL num monolito com banco único); `servico_catalogo_id` e `item_estoque_id` em `itens_da_ordem` são referências lógicas sem `FOREIGN KEY` (o consumidor valida pela porta do contexto vizinho; índice em `item_estoque_id` para a consulta cross-contexto). `consentimentos` guarda o consentimento LGPD por cliente (`tipo`, concessão e revogação), com remoção em cascata. `outbox` e `processed_events` não têm FK para as tabelas de negócio de propósito — `agregado_id` é referência lógica ao agregado emissor, e `processed_events` garante idempotência de entrega por `(outbox_id, handler)` (PK composta desde a migração `008`). O JSONB em `orcamento_json`, `escopo_aprovado_json` e `payload` é o recurso específico do PostgreSQL que ancora a justificativa formal do banco ([ADR-031](../../adr/fase3/031-banco-gerenciado-rds.md)). A Lambda de autenticação lê apenas `clientes` (colunas `documento_hash` — HMAC-SHA256 determinístico do documento, único — e `ativo`; `documento` em si fica cifrado com Fernet).
 
 ## 3. Topologia local espelho
 

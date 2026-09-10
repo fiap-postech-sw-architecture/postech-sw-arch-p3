@@ -227,6 +227,8 @@ Atualização de dependências automatizada por [Dependabot](.github/dependabot.
 
 Documentação interativa no Swagger UI: `http://localhost:8000/docs` no compose e `http://localhost:18000/docs` via port-forward do cluster. Na AWS, o NLB da API é interno e não expõe `/docs` diretamente à internet.
 
+Artefatos versionados da fase 3: [OpenAPI (`openapi-fase3.json`)](docs/entrega/fase3/openapi-fase3.json) e [collection Postman (`postman-collection-fase3.json`)](docs/entrega/fase3/postman-collection-fase3.json), com o smoke executável via newman na pasta `00 - Smoke fase 3 (newman)` da collection.
+
 | Grupo | Prefixo | Operações |
 |---|---|---|
 | Clientes | /api/v1/clientes | CRUD + veículos + LGPD (dados pessoais, consentimento) |

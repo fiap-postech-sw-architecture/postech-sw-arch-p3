@@ -67,7 +67,7 @@ Termos do domínio mapeados para identificadores no código, seguindo o modelo h
 |---|---|---|
 | Usuário (sinônimo: usuário interno) | `Usuario` | Entidade que representa um operador do sistema (admin, atendente ou mecânico). O cliente da oficina não é `Usuario`: autentica por CPF na Lambda da fase 3 e recebe um JWT com papel `Cliente`, sem registro em `usuarios`. |
 | Token revogado | `TokenRevogado` | Entidade raiz do seu próprio agregado trivial: denylist de JTI que invalida access/refresh tokens antes do `exp` (logout e rotação). |
-| Papel | `Papel` | Enum que define os papéis de acesso: `Admin`, `Atendente`, `Mecanico` e, desde a fase 3, `Cliente` (emitido só pela Lambda de autenticação por CPF; acesso restrito às rotas `/api/v1/minhas-ordens`, que filtram pelo `sub` do token). RBAC aplicado por mapa de permissões (`src/autenticacao/interfaces/middleware.py`), com `Admin` herdando os demais; coberto pela matriz RBAC dos testes. Usado no payload JWT. |
+| Papel | `Papel` | Enum que define os papéis de acesso: `Admin`, `Atendente`, `Mecanico` e, desde a fase 3, `Cliente` (emitido só pela Lambda de autenticação por CPF; acesso restrito às rotas `/api/v1/minhas-ordens`, que filtram pelo `sub` do token). RBAC aplicado por mapa de permissões (`src/autenticacao/interfaces/middleware.py`), com `Admin` herdando `Atendente` e `Mecanico`, enquanto `Cliente` tem permissão disjunta, sem herança; coberto pela matriz RBAC dos testes. Usado no payload JWT. |
 
 ## Termos Compartilhados
 

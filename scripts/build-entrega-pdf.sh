@@ -11,8 +11,6 @@
 #   5. o bloco Mermaid (que pandoc nao renderiza) vira PNG via mermaid-cli;
 #   6. pandoc + weasyprint produzem o PDF.
 # Requisitos: python3, pandoc, weasyprint, npx (mermaid-cli baixado on-demand).
-# Enquanto o VIDEO-LINK-FASE-3 for placeholder o PDF sai com sufixo -DRAFT e
-# aviso na capa -- o arquivo final so existe depois de preencher o link.
 # Uso: bash scripts/build-entrega-pdf.sh   (da raiz do repo; OUT=... sobrescreve o destino)
 set -euo pipefail
 
@@ -34,19 +32,7 @@ for f in "$SRC" "$SEGURANCA" scripts/rewrite-md-links.py logo-pytstop.png \
   [ -f "$f" ] || { echo "erro: arquivo obrigatorio ausente: $f" >&2; exit 1; }
 done
 
-# Placeholder do video => versao preliminar (nome -DRAFT + aviso na capa).
-PRELIMINAR=0
-if grep -q "VIDEO-LINK-FASE-3" "$SRC"; then
-  PRELIMINAR=1
-  echo "AVISO: VIDEO-LINK-FASE-3 ainda presente (video da fase 3 pendente) -- gerando versao -DRAFT." >&2
-fi
-if [ "$PRELIMINAR" = 1 ]; then
-  OUT="${OUT:-${OUT_DIR}/documento-entrega-fase-3-DRAFT.pdf}"
-else
-  OUT="${OUT:-${OUT_DIR}/documento-entrega-fase-3.pdf}"
-  # Build final apaga o rascunho anterior para nao sobrar um -DRAFT velho ao lado.
-  rm -f "${OUT_DIR}/documento-entrega-fase-3-DRAFT.pdf"
-fi
+OUT="${OUT:-${OUT_DIR}/documento-entrega-fase-3.pdf}"
 
 # 1) Links absolutos por-arquivo (cada um com seu base-dir). O rodape de
 #    navegacao dos .md ("> [↑ Raiz do projeto] · ...") serve ao GitHub, nao ao
@@ -64,10 +50,6 @@ EOF
 rewrite "$SRC"       "${TMP}/body.md"   docs/entrega/fase3
 rewrite "$SEGURANCA" "${TMP}/anexoA.md" docs/seguranca
 
-AVISO_PRELIMINAR=""
-if [ "$PRELIMINAR" = 1 ]; then
-  AVISO_PRELIMINAR="_Versão preliminar — vídeo da fase 3 pendente; a seção 3 traz, provisoriamente, o vídeo da fase 2_"
-fi
 
 # 2) CAPA ABNT (quebra de pagina apos) + CSS de tabela (colunas estreitas de
 #    ID/PR nao roubam espaco do texto; celulas quebram palavra a palavra).
@@ -92,12 +74,17 @@ cat > "$COMBINADO" <<CAPA
   #TOC li { margin: 3pt 0; }
   #TOC a { text-decoration: none; color: inherit; }
   #TOC a::after { content: leader('.') target-counter(attr(href), page); }
-  /* Diagrama de componentes em pagina paisagem: o flowchart e largo e, em
-     retrato, o texto dos nos fica ilegivel. */
+  /* Diagramas Mermaid em pagina propria: os largos (componentes) em paisagem,
+     os altos (sequencia longa, ER) em retrato inteiro. max-height impede o
+     corte no rodape que uma imagem alta sofreria (weasyprint nao pagina img). */
   @page paisagem { size: A4 landscape; margin: 1.2cm; @bottom-center { content: counter(page); font-size: 9pt; color: #555; } }
   /* O CSS default do pandoc limita o body a 36em centralizado; a div sai
      desse limite (largura fixa + margem negativa) para ocupar a paisagem. */
   .paisagem { page: paisagem; break-before: page; break-after: page; width: 26cm; margin-left: -5.4cm; }
+  .paisagem img { display: block; margin: 0 auto; max-width: 100%; max-height: 16.5cm; }
+  .retrato { break-before: page; break-after: page; width: 17cm; margin-left: -1.3cm; }
+  .retrato img { display: block; margin: 0 auto; max-width: 100%; max-height: 23cm; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>
 
 <div style="text-align:center; min-height:23cm; display:flex; flex-direction:column; justify-content:space-between; break-after:page;">
@@ -119,8 +106,6 @@ cat > "$COMBINADO" <<CAPA
 <p style="font-size:15pt; font-weight:bold; margin:0.2cm 0;">PytStop — Plataforma de Gestão de Ordens de Serviço</p>
 
 _Documento de Entrega_
-
-${AVISO_PRELIMINAR}
 
 </div>
 
@@ -187,37 +172,69 @@ ANEXOB2
   printf '\n## B3 — OWASP ZAP baseline (sumário persistido)\n\n```text\n'
   cat "$EVID/zap-baseline-2026-07-11.txt"
   printf '\n```\n'
+  cat <<'ANEXOB4'
+
+## B4 — Dashboards e alertas do Grafana (kind, 10/09/2026)
+
+Stack completa levantada com `make cd-local` (mesmos manifests base do EKS),
+com o smoke da collection Postman executado antes das capturas.
+ANEXOB4
+  evidencia b2a-grafana-negocio.png "Dashboard PytStop — Negócio: OS criadas (24h e por hora), tempo médio por status, erros e fila da outbox, status NOC"
+  evidencia b2b-grafana-plataforma.png "Dashboard PytStop — Plataforma: health, uptime, taxa de erro 5xx e latência p50/p90/p99 por rota"
+  evidencia b2c-grafana-alertas.png "Regras de alerta provisionadas como código (RNF-028)"
+  printf '\n## B5 — Smoke da collection Postman via newman (kind, 10/09/2026)\n\n```text\n'
+  cat "$EVID/newman-smoke-2026-09-10.txt"
+  printf '\n```\n'
 } >> "$COMBINADO"
 
-# 5) Mermaid -> PNG, um por bloco (diagrama de componentes da secao 7).
+# 5) Mermaid -> PNG, um por bloco. A substituicao no markdown acontece depois
+#    do render porque a orientacao da pagina depende da proporcao do PNG, e a
+#    legenda deriva do comentario "<!-- fonte: RFC-003 §x -->" que precede
+#    cada bloco no .md (falha alto se ele faltar).
 python3 - "$COMBINADO" "$TMP" <<'EOF'
 import re, sys
 md, tmp = sys.argv[1:3]
 src = open(md, encoding="utf-8").read()
-blocos = list(re.finditer(r"```mermaid\n(.*?)```", src, re.S))
+blocos = re.findall(r"```mermaid\n(.*?)```", src, re.S)
 if not blocos:
     sys.exit("erro: nenhum bloco ```mermaid``` no markdown combinado")
-for n, m in enumerate(blocos, 1):
-    open(f"{tmp}/diagrama-{n}.mmd", "w", encoding="utf-8").write(m.group(1))
-    src = src.replace(
-        m.group(0),
-        # <img> cru com width:100%: a imagem markdown herda o DPI gravado no PNG
-        # (escala 2 do mermaid-cli) e sai com metade da largura da pagina.
-        f'<div class="paisagem">\n\n<img src="{tmp}/diagrama-{n}.png" alt="Diagrama {n}" style="width:100%; display:block;"/>\n\n'
-        f'<p><em>Diagrama {n} — fonte Mermaid na RFC-003 §4 e na seção 7 do documento no repositório.</em></p>\n\n</div>',
-    )
-open(md, "w", encoding="utf-8").write(src)
+for n, corpo in enumerate(blocos, 1):
+    open(f"{tmp}/diagrama-{n}.mmd", "w", encoding="utf-8").write(corpo)
 EOF
 for mmd in "$TMP"/diagrama-*.mmd; do
   npx -y @mermaid-js/mermaid-cli -i "$mmd" -o "${mmd%.mmd}.png" -w 1600 -s 2 -b white
 done
+python3 - "$COMBINADO" "$TMP" <<'EOF'
+import re, struct, sys
+md, tmp = sys.argv[1:3]
+src = open(md, encoding="utf-8").read()
+padrao = re.compile(r"(?:<!-- fonte: RFC-003 (§\d+)[^\n]*-->\n)?```mermaid\n.*?```", re.S)
+n = 0
+def trocar(m):
+    global n
+    n += 1
+    if not m.group(1):
+        sys.exit(f"erro: bloco mermaid {n} sem comentario '<!-- fonte: RFC-003 §x -->' antes dele")
+    with open(f"{tmp}/diagrama-{n}.png", "rb") as fh:
+        largura, altura = struct.unpack(">II", fh.read(24)[16:24])
+    classe = "paisagem" if largura >= altura * 1.3 else "retrato"
+    # <img> cru: a imagem markdown herdaria o DPI do PNG (escala 2 do
+    # mermaid-cli) e sairia com metade da largura; max-width/max-height no CSS
+    # da classe encaixam o diagrama na pagina sem corte.
+    return (
+        f'<div class="{classe}">\n\n<img src="{tmp}/diagrama-{n}.png" alt="Diagrama {n}"/>\n\n'
+        f"<p><em>Diagrama {n} — fonte Mermaid na RFC-003 {m.group(1)} e na seção 7 do documento no repositório.</em></p>\n\n</div>"
+    )
+src = padrao.sub(trocar, src)
+open(md, "w", encoding="utf-8").write(src)
+EOF
 
 # 6) HTML intermediario + larguras de coluna + PDF. O passo Python fixa a
 #    largura das colunas de codigo curto (ID, PR, #) em TODAS as tabelas de uma
 #    vez -- sem ele o layout automatico distribuia espaco igualmente e espremia
 #    as colunas de texto.
 TMP_HTML="${TMP}/entrega.html"
-pandoc "$COMBINADO" -o "$TMP_HTML" -s -V lang=pt-BR --toc --toc-depth=2 \
+pandoc "$COMBINADO" -o "$TMP_HTML" -s -V lang=pt-BR --toc --toc-depth=3 \
   -V toc-title="Sumário" --metadata pagetitle="PytStop — Entrega Fase 3"
 python3 - "$TMP_HTML" <<'EOF'
 import re
@@ -268,4 +285,4 @@ open(sys.argv[1], "w", encoding="utf-8").write(html)
 EOF
 weasyprint "$TMP_HTML" "$OUT" 2> >(grep -v "WARNING" >&2 || true)
 
-echo ">> PDF gerado em $OUT (preliminar=$PRELIMINAR)"
+echo ">> PDF gerado em $OUT"

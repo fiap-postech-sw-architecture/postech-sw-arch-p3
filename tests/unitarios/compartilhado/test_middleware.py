@@ -127,6 +127,18 @@ class TestSecurityHeadersMiddleware:
 
         assert resp.headers["X-Request-ID"] == id_limite
 
+    def test_x_request_id_do_api_gateway_e_aceito(self) -> None:
+        # Formato real do $context.requestId do API Gateway (termina em "="),
+        # injetado como X-Request-ID pela integracao privada (RNF-029).
+        app = _criar_app_com_saude()
+        app.add_middleware(SecurityHeadersMiddleware)
+        client = TestClient(app)
+        id_gateway = "JKJaXmiyIAMESJ4="
+
+        resp = client.get("/saude", headers={"X-Request-ID": id_gateway})
+
+        assert resp.headers["X-Request-ID"] == id_gateway
+
     def test_csp_nao_aplicado_em_rotas_de_docs(self) -> None:
         app = FastAPI()
 
