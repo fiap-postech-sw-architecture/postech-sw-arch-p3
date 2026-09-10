@@ -1,5 +1,9 @@
 name: CI
 
+# Token do job so precisa ler o repo (alerta CodeQL actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 on:
   workflow_dispatch: # disparo manual (Desbloqueio 2: gh workflow run ci.yml)
   push:
