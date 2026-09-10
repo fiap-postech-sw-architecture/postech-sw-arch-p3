@@ -31,10 +31,12 @@ def _caminho_de_docs(path: str) -> bool:
 
 # Correlacao fim-a-fim (RNF-029 / ADR-032): o X-Request-ID gerado na borda
 # externa (API Gateway -> lambda -> app) e aceito quando "sano" — ate 128
-# chars de um charset seguro para logs e headers. Qualquer outra coisa
-# (vazio, longo demais, espacos, CRLF, unicode) e descartada e um uuid4 novo
-# assume: nunca ecoamos lixo nem injecao de log de volta no header.
-_REQUEST_ID_EXTERNO_VALIDO = re.compile(r"[A-Za-z0-9._-]{1,128}")
+# chars de um charset seguro para logs e headers. O "=" entra porque o
+# $context.requestId do API Gateway (ex.: "JKJaXmiyIAMESJ4=") termina com ele.
+# Qualquer outra coisa (vazio, longo demais, espacos, CRLF, unicode) e
+# descartada e um uuid4 novo assume: nunca ecoamos lixo nem injecao de log de
+# volta no header.
+_REQUEST_ID_EXTERNO_VALIDO = re.compile(r"[A-Za-z0-9._=-]{1,128}")
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

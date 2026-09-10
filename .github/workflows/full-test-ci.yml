@@ -6,6 +6,10 @@ name: full-test (ci)
 # com sleeps reais e todas as journeys) em PR/push/nightly. Ele e superset do
 # plano reduzido (test_plano_ci), entao cobre o subset sem rodar os dois —
 # rodar ambos colidiria documentos (mesmo seed gera os mesmos CPFs).
+# Token do job so precisa ler o repo (alerta CodeQL actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 on:
   pull_request:
     branches: [main]

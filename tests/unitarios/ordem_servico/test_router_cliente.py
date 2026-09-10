@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 
 from src.autenticacao.interfaces.middleware import obter_usuario_atual
 from src.compartilhado.interfaces.dependencies import obter_session
+from src.compartilhado.interfaces.error_handler import registrar_error_handlers
+from src.ordem_servico.dominio.exceptions import OrdemNaoEncontradaException
 from src.ordem_servico.interfaces.router_cliente import router
 
 _AGORA = datetime.now(tz=UTC)
@@ -94,3 +96,17 @@ def test_papel_interno_retorna_403() -> None:
 def test_sub_invalido_retorna_401() -> None:
     app = _criar_app({"sub": "invalido", "papel": "cliente"})
     assert TestClient(app).get("/api/v1/minhas-ordens").status_code == 401
+
+
+def test_ordem_de_outro_cliente_retorna_404() -> None:
+    # O use case trata ordem alheia como inexistente (anti-enumeracao, RN-021);
+    # aqui se prova que esse erro de dominio vira 404 HTTP, nao 500.
+    app = _criar_app({"sub": str(uuid4()), "papel": "cliente"})
+    registrar_error_handlers(app)
+    with patch(
+        "src.ordem_servico.interfaces.router_cliente.obter_ordem_do_cliente"
+    ) as factory:
+        factory.return_value.executar.side_effect = OrdemNaoEncontradaException(uuid4())
+        response = TestClient(app).get(f"/api/v1/minhas-ordens/{uuid4()}")
+
+    assert response.status_code == 404

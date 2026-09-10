@@ -161,4 +161,10 @@ A consulta que motivou (g) foi feita com a conta `Gryog`, que tem `write`: os en
 
 Fica sem efeito a correção de (g). Os deploys de 07/09/2026 passaram pela proteção: todos via PR com checks verdes. Também em 09/09/2026 o usuário `soat-architecture` recebeu convite de colaborador de leitura nos cinco repositórios.
 
+### (i) Homologação e produção compartilham a infraestrutura no app e na lambda (2026-09-10)
+
+A frase de (b) "app e lambda mantêm homolog real: overlay/workspace de stage próprios" não corresponde à implementação. O `cd.yml` do app aplica o mesmo overlay `k8s/overlays/eks` no mesmo cluster e namespace para `homolog` e `main`; os GitHub Environments `homologacao` e `producao` só rotulam o deploy. O Terraform da lambda mantém uma única function, servida pelos stages `homolog` e `prod` da mesma HTTP API. O deploy automático por branch existe nos quatro repositórios; o isolamento de ambientes não, pela mesma restrição de (b): um único Learner Lab. Como as duas branches convergem para o mesmo namespace, o `concurrency` do CD do app passa a serializar por repositório, e não por branch.
+
+A proteção da `main` exige PR sem exigir aprovação (`required_approving_review_count = 0`): o grupo tem cinco integrantes e revisa por convenção; os checks obrigatórios são o freio técnico.
+
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

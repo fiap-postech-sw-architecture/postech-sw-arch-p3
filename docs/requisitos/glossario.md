@@ -2,7 +2,7 @@
 
 > [↑ Raiz do projeto](../../README.md) · [↑ Requisitos](README.md)
 
-> **Versão**: 1.2 — Fase 2 (v1.1: casing de `StatusOrdem` + `Contato`/`Situação`; v1.2: termos de LGPD, autenticação e integração — `ConsentimentoCliente`, `DocumentoAnonimizado`, `PlacaAnonimizada`, `TokenRevogado`, `IntegrationEvent`).
+> **Versão**: 1.3 — Fase 3 (v1.3: papel `Cliente`, sinônimo "usuário interno" e a autenticação de clientes por CPF; v1.2: termos de LGPD, autenticação e integração — `ConsentimentoCliente`, `DocumentoAnonimizado`, `PlacaAnonimizada`, `TokenRevogado`, `IntegrationEvent`; v1.1: casing de `StatusOrdem` + `Contato`/`Situação`).
 
 Termos do domínio mapeados para identificadores no código, seguindo o modelo híbrido (ADR-009): termos de negócio em português sem acentos, sufixos de padrão técnico em inglês.
 
@@ -65,9 +65,9 @@ Termos do domínio mapeados para identificadores no código, seguindo o modelo h
 
 | Termo do Domínio | Identificador no Código | Definição |
 |---|---|---|
-| Usuário | `Usuario` | Entidade que representa um operador do sistema (admin, atendente ou mecânico). |
+| Usuário (sinônimo: usuário interno) | `Usuario` | Entidade que representa um operador do sistema (admin, atendente ou mecânico). O cliente da oficina não é `Usuario`: autentica por CPF na Lambda da fase 3 e recebe um JWT com papel `Cliente`, sem registro em `usuarios`. |
 | Token revogado | `TokenRevogado` | Entidade raiz do seu próprio agregado trivial: denylist de JTI que invalida access/refresh tokens antes do `exp` (logout e rotação). |
-| Papel | `Papel` | Enum que define os papéis de acesso: `Admin`, `Atendente`, `Mecanico`. RBAC aplicado por mapa de permissões (`src/autenticacao/interfaces/middleware.py`), com `Admin` herdando os demais; coberto pela matriz RBAC dos testes. Usado no payload JWT. |
+| Papel | `Papel` | Enum que define os papéis de acesso: `Admin`, `Atendente`, `Mecanico` e, desde a fase 3, `Cliente` (emitido só pela Lambda de autenticação por CPF; acesso restrito às rotas `/api/v1/minhas-ordens`, que filtram pelo `sub` do token). RBAC aplicado por mapa de permissões (`src/autenticacao/interfaces/middleware.py`), com `Admin` herdando `Atendente` e `Mecanico`, enquanto `Cliente` tem permissão disjunta, sem herança; coberto pela matriz RBAC dos testes. Usado no payload JWT. |
 
 ## Termos Compartilhados
 

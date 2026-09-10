@@ -2,7 +2,7 @@
 
 > [↑ Raiz do projeto](../../README.md) · [↑ Arquitetura](README.md)
 
-> **Versão**: 1.1 — Fase 2. Corrige assinaturas de portas (`ClientePort`, `EstoquePort`), o agregado Cliente/Veículo e adiciona o caminho assíncrono (outbox + relay).
+> **Versão**: 1.2 — Fase 3. Adiciona a leitura compartilhada da tabela `clientes` pela Lambda de autenticação (v1.1: assinaturas de portas, agregado Cliente/Veículo e caminho assíncrono outbox + relay).
 
 5 contextos delimitados com padrões de integração DDD. Decisão de organização: [ADR-007](adr/007-organizacao-contextos-delimitados.md).
 
@@ -21,6 +21,9 @@ graph LR
     subgraph Generico
         A[Autenticacao<br/><i>Generico</i>]
     end
+    subgraph Serverless["Fora do monolito (fase 3)"]
+        L[Lambda de autenticacao por CPF<br/><i>Generico, serverless</i>]
+    end
 
     C -->|Cliente-Fornecedor + ACL| OS
     CS -->|Cliente-Fornecedor + ACL| OS
@@ -29,6 +32,7 @@ graph LR
     A -.->|middleware| C
     A -.->|middleware| CS
     A -.->|middleware| E
+    C -.->|leitura direta de clientes - shared database, ADR-028| L
 ```
 
 > Direção das setas: fornecedor → consumidor (upstream → downstream).
@@ -100,6 +104,13 @@ Operações de leitura — não recebem `UnitOfWork`. O adaptador vive na infrae
 > **Trade-off**: essa porta reversa cria uma dependência cíclica no nível de infraestrutura (adapters). No monolito MVP, isso é aceitável — os contextos de domínio permanecem desacoplados. Em evolução para microsserviços, essa consulta seria substituída por eventos de domínio ou eventual consistency.
 >
 > Exceção pragmática da mesma natureza: a consulta pública de acompanhamento (`OrdemDeServicoRepository.obter_por_placa_e_documento`) é implementada na infraestrutura de OS como join somente-leitura nas tabelas `clientes` e `veiculos` do contexto vizinho — não atravessa o domínio de Cliente+Veículo nem passa pela `ClientePort`.
+
+### Leitura compartilhada pela Lambda de autenticação (Fase 3)
+
+**Fornecedor**: Cliente + Veículo (tabela `clientes`)
+**Consumidor**: Lambda de autenticação por CPF (repositório `postech-sw-arch-p3-lambda`, fora do monólito)
+
+A function serverless lê `clientes` diretamente no banco compartilhado (`SELECT id, contato, ativo FROM clientes WHERE documento_hash = %s`), sem porta nem evento: é um padrão *shared database* deliberado ([ADR-028](adr/fase3/028-autenticacao-serverless-cpf.md)), justificado pelo requisito de a Lambda consultar existência e status do cliente na mesma base. O contrato é estreito e explícito — as colunas `id`, `contato`, `ativo` e `documento_hash` (HMAC-SHA256 derivado da mesma `ENCRYPTION_KEY` do app) — e testado por paridade de hash e de claims nas duas bases de código. Mudança nessas colunas exige mudança coordenada nos dois repositórios.
 
 ### Middleware (Cross-Cutting)
 

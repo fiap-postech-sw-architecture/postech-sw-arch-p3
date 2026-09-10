@@ -2,7 +2,7 @@
 
 > [↑ Raiz do projeto](../../README.md) · [↑ Segurança](README.md)
 
-> **Versão**: 1.2 — registra trivy e gitleaks verdes no CI (03/09/2026) e a remoção do `pip` das imagens de runtime; a 1.1 atualizou a seção SonarQube com o fechamento dos 143 code smells (PR #6). Bateria executada em 11-12/07/2026 na árvore de trabalho da HEAD atual dos repositórios `p3` e `p3-lambda`, via gate espelho ([ADR-033](../arquitetura/adr/fase3/033-cicd-multi-repo.md)); trivy e gitleaks rodam no CI desde a renovação da cota do Actions (01/08/2026). Sucede o [scan-fase-2.md](scan-fase-2.md), cuja baseline o snapshot da fase 3 herda.
+> **Versão**: 1.3 — registra o CodeQL default setup do GitHub habilitado em `p3` e `p3-lambda` (10/09/2026); a 1.2 registrou trivy e gitleaks verdes no CI (03/09/2026) e a remoção do `pip` das imagens de runtime; a 1.1 atualizou a seção SonarQube com o fechamento dos 143 code smells (PR #6). Bateria executada em 11–12/07/2026 na árvore de trabalho da HEAD atual dos repositórios `p3` e `p3-lambda`, via gate espelho ([ADR-033](../arquitetura/adr/fase3/033-cicd-multi-repo.md)); trivy e gitleaks rodam no CI desde a renovação da cota do Actions (01/08/2026). Sucede o [scan-fase-2.md](scan-fase-2.md), cuja baseline o snapshot da fase 3 herda.
 
 ## Escopo
 
@@ -18,14 +18,14 @@ Bateria da fase 3 sobre as camadas do pipeline de segurança ([ADR-011](../arqui
 
 ## Resumo
 
-| Ferramenta | Tipo | Alvo | Resultado (2026-07-11) |
+| Ferramenta | Tipo | Alvo | Resultado (11/07/2026) |
 |---|---|---|---|
 | bandit (`make security`, p3) | SAST | `src/` + `ui/` + `relay/` + `scripts/` | **0 high / 0 medium** — 10 low informativos revisados (o gate reprova em high) |
 | bandit (`make security`, p3-lambda) | SAST | `src/` da function | **0 issues** em qualquer severidade |
 | pip-audit | SCA (deps) | ambiente resolvido do `uv.lock` | **0 vulnerabilidades** conhecidas |
 | OWASP ZAP (baseline) | DAST | API viva (stack compose, `make dast`) | **FAIL 0 · WARN 0 · PASS 65** em 58 URLs — [sumário persistido](../entrega/fase3/evidencias/zap-baseline-2026-07-11.txt) |
-| CodeQL (suíte de qualidade) | SAST semântico | código Python (`make codeql-quality`) | **0 findings ativos** |
-| SonarQube (Community, local) | Análise estática + hotspots | `src/` + coverage importado | **Quality Gate Passed** — 0 bugs, 0 vulnerabilities, 0 hotspots, 0 code smells (143 zerados no PR #6), ratings A/A/A; 94,6% no denominador do Sonar (gate real 96,8%) |
+| CodeQL (suíte de qualidade) | SAST semântico | código Python (`make codeql-quality`) | **0 findings ativos**; default setup do GitHub habilitado em 10/09/2026 (p3 e p3-lambda): 3 falsos positivos descartados com justificativa, 10 avisos de permissão de workflow corrigidos (6 no p3, 4 no p3-lambda) |
+| SonarQube (Community, local) | Análise estática + hotspots | `src/` + coverage importado | **Quality Gate Passed** — 0 bugs, 0 vulnerabilities, 0 hotspots, 0 code smells (143 zerados no PR #6), ratings A/A/A; 94,6% no denominador do Sonar (gate real 96,4%) |
 | SBOM (CycloneDX, `make sbom`) | Inventário de dependências | deps de runtime do `uv.lock` | **Gerado e validado** — 48 refs |
 | trivy · gitleaks | SCA (imagem) / segredos | imagem Docker, árvore git | **Verdes no CI em 03/09/2026** — trivy 0 HIGH/CRITICAL, gitleaks 0 achados (seção "trivy e gitleaks") |
 
@@ -43,11 +43,11 @@ Execução efêmera (`uv run --with pip-audit pip-audit`) sobre o ambiente resol
 
 ## SAST Semântico (CodeQL)
 
-Suíte de qualidade local (`make codeql-quality`, paridade com o default setup do GitHub): 0 findings ativos; os achados brutos estão todos tratados por configuração ou supressão justificada. Nesta rodada, 1 constante morta removida e 2 falsos positivos suprimidos com razão registrada.
+Suíte de qualidade local (`make codeql-quality`, paridade com o default setup do GitHub): 0 findings ativos; os achados brutos estão todos tratados por configuração ou supressão justificada. Nesta rodada, 1 constante morta removida e 2 falsos positivos suprimidos com razão registrada. O CodeQL default setup do GitHub está habilitado desde 10/09/2026 em `p3` e `p3-lambda` (varredura a cada push e PR): 3 alertas descartados como falso positivo com justificativa (pré-hash SHA-256 antes do bcrypt, [TD-028](../tech-debt/README.md); duas asserções de teste de CORS) e 10 avisos `actions/missing-workflow-permissions` (6 no `p3`, 4 no `p3-lambda`) corrigidos com `permissions: contents: read` nos workflows.
 
 ## SonarQube (scan manual de fechamento)
 
-SonarQube Community local + `sonar-scanner` com coverage importado: Quality Gate **Passed**, com 0 bugs, 0 vulnerabilities, 0 security hotspots, 0 code smells e 0% duplicação. Cobertura de 94,6% no denominador do Sonar (o gate real do projeto mede 96,8%; divergência de universo documentada no `sonar-project.properties`). Screenshot do Quality Gate em [entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png](../entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png).
+SonarQube Community local + `sonar-scanner` com coverage importado: Quality Gate **Passed**, com 0 bugs, 0 vulnerabilities, 0 security hotspots, 0 code smells e 0% duplicação. Cobertura de 94,6% no denominador do Sonar (o gate real do projeto mede 96,4%; divergência de universo documentada no `sonar-project.properties`). Screenshot do Quality Gate em [entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png](../entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png).
 
 O primeiro scan apontou 3 security hotspots (os mesmos da fase 2: ReDoS na regex de e-mail e dois avisos de `http://` no exporter OTLP) — todos revisados como SAFE com justificativa inline no código — e **143 code smells** de maintainability (rating A, até então informativos, nunca corrigidos). Os 143 foram zerados no [PR #6](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/pull/6):
 
