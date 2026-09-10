@@ -44,6 +44,8 @@ if [ "$PRELIMINAR" = 1 ]; then
   OUT="${OUT:-${OUT_DIR}/documento-entrega-fase-3-DRAFT.pdf}"
 else
   OUT="${OUT:-${OUT_DIR}/documento-entrega-fase-3.pdf}"
+  # Build final apaga o rascunho anterior para nao sobrar um -DRAFT velho ao lado.
+  rm -f "${OUT_DIR}/documento-entrega-fase-3-DRAFT.pdf"
 fi
 
 # 1) Links absolutos por-arquivo (cada um com seu base-dir). O rodape de
@@ -77,9 +79,22 @@ cat > "$COMBINADO" <<CAPA
   th, td { padding: 3pt 5pt; vertical-align: top; overflow-wrap: break-word; }
   th { text-align: left; }
   img { max-width: 100%; }
+  /* Paginacao no rodape (capa sem numero) e bookmarks por titulo. */
+  @page { size: A4; @bottom-center { content: counter(page); font-size: 9pt; color: #555; } }
+  @page :first { @bottom-center { content: none; } }
+  h1 { bookmark-level: 1; }
+  h2 { bookmark-level: 2; }
+  h3 { bookmark-level: 3; }
+  /* Sumario gerado pelo pandoc (--toc), movido para depois da capa. */
+  #TOC { break-after: page; }
+  #TOC ul { list-style: none; padding-left: 0; }
+  #TOC ul ul { padding-left: 1.2em; }
+  #TOC li { margin: 3pt 0; }
+  #TOC a { text-decoration: none; color: inherit; }
+  #TOC a::after { content: leader('.') target-counter(attr(href), page); }
   /* Diagrama de componentes em pagina paisagem: o flowchart e largo e, em
      retrato, o texto dos nos fica ilegivel. */
-  @page paisagem { size: A4 landscape; margin: 1.2cm; }
+  @page paisagem { size: A4 landscape; margin: 1.2cm; @bottom-center { content: counter(page); font-size: 9pt; color: #555; } }
   /* O CSS default do pandoc limita o body a 36em centralizado; a div sai
      desse limite (largura fixa + margem negativa) para ocupar a paisagem. */
   .paisagem { page: paisagem; break-before: page; break-after: page; width: 26cm; margin-left: -5.4cm; }
@@ -99,9 +114,9 @@ cat > "$COMBINADO" <<CAPA
 
 <img src="${PWD}/logo-pytstop.png" alt="Logo PytStop" style="width:4.5cm; margin: 0 auto 0.8cm auto; display:block;"/>
 
-# Tech Challenge — Fase 3
+<p style="font-size:26pt; font-weight:bold; margin:0.4cm 0;">Tech Challenge — Fase 3</p>
 
-### PytStop — Plataforma de Gestão de Ordens de Serviço
+<p style="font-size:15pt; font-weight:bold; margin:0.2cm 0;">PytStop — Plataforma de Gestão de Ordens de Serviço</p>
 
 _Documento de Entrega_
 
@@ -124,6 +139,8 @@ ${CIDADE} — ${ANO}
 </div>
 
 </div>
+
+<div id="pos-capa"></div>
 
 CAPA
 
@@ -200,8 +217,8 @@ done
 #    vez -- sem ele o layout automatico distribuia espaco igualmente e espremia
 #    as colunas de texto.
 TMP_HTML="${TMP}/entrega.html"
-pandoc "$COMBINADO" -o "$TMP_HTML" -s -V lang=pt-BR \
-  --metadata pagetitle="PytStop — Entrega Fase 3"
+pandoc "$COMBINADO" -o "$TMP_HTML" -s -V lang=pt-BR --toc --toc-depth=2 \
+  -V toc-title="Sumário" --metadata pagetitle="PytStop — Entrega Fase 3"
 python3 - "$TMP_HTML" <<'EOF'
 import re
 import sys
@@ -220,6 +237,17 @@ html = open(sys.argv[1], encoding="utf-8").read()
 # Pandoc emite <colgroup> com fatias iguais nas tabelas cujo markdown tem
 # linhas longas; essas larguras vencem as dos <th> e igualam todas as colunas.
 html = re.sub(r"<colgroup>.*?</colgroup>", "", html, flags=re.S)
+
+# O pandoc poe o sumario antes de todo o corpo (isto e, antes da capa);
+# move o <nav id="TOC"> para logo depois do marcador que fecha a capa.
+m = re.search(r"<nav id=\"TOC\".*?</nav>", html, flags=re.S)
+if m:
+    nav = m.group(0)
+    html = html.replace(nav, "", 1)
+    # O pandoc pode renderizar o marcador como <div id="pos-capa">\n</div>.
+    html, n = re.subn(r'(<div id="pos-capa">\s*</div>)', lambda mm: mm.group(1) + nav, html, count=1)
+    if n != 1:
+        sys.exit("erro: marcador pos-capa nao encontrado no HTML; sumario nao reposicionado")
 
 def ajustar_ths(m: re.Match[str]) -> str:
     th = m.group(0)

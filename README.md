@@ -54,8 +54,10 @@ flowchart TB
             apigw["Amazon API Gateway<br/>HTTP API (ADR-027)"]
             lambda_auth["Lambda de autenticação<br/>python3.13 (ADR-028)"]
             authorizer["Lambda authorizer<br/>valida JWT HS256 (ADR-027)"]
+            vpclink["API Gateway VPC Link<br/>duas subnets privadas"]
         end
         subgraph eks["Amazon EKS (ADR-030) — Terraform em p3-infra-k8s · manifests k8s/ neste repo"]
+            nlb["NLB interno<br/>listener TCP 8000"]
             app["PytStop API — Deployment<br/>Clean Architecture + HPA<br/>(valida JWT também — defense in depth)"]
             relay["Relay de eventos<br/>outbox → SMTP (ADR-022)"]
             redis["Redis — rate limiter"]
@@ -75,10 +77,12 @@ flowchart TB
 
     cliente -->|"POST rota de autenticação (CPF)"| apigw
     cliente -->|"rotas protegidas + Bearer"| apigw
-    interno -->|"login interno + rotas + Bearer"| apigw
+    interno -->|"UI / canal interno"| app
     apigw -->|"invoca"| lambda_auth
     apigw -.->|"consulta autorização"| authorizer
-    apigw -->|"roteia por prefixo"| app
+    apigw -->|"rotas protegidas"| vpclink
+    vpclink --> nlb
+    nlb --> app
     lambda_auth -->|"consulta cliente<br/>(documento_hash, ativo) — só leitura"| rds
     app -->|"SQL via DATABASE_URL"| rds
     app -->|"grava outbox + NOTIFY<br/>na mesma transação"| rds

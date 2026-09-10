@@ -36,11 +36,11 @@ permissions:
   contents: read
   packages: write
 
-# Um deploy por vez POR BRANCH (main e homolog nao se serializam entre si),
-# sem cancelar o que ja esta em andamento: cada branch converge para o
-# ultimo push assim que a fila drena.
+# Um deploy por vez POR REPOSITORIO: main e homolog convergem para o mesmo
+# cluster/namespace (ADR-033, Adendo (i)), entao serializam entre si; sem
+# cancelar o que ja esta em andamento, cada push entra na fila e converge.
 concurrency:
-  group: cd-${{ github.ref_name }}
+  group: cd-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:

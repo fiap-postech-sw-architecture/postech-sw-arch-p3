@@ -18,14 +18,14 @@ Bateria da fase 3 sobre as camadas do pipeline de segurança ([ADR-011](../arqui
 
 ## Resumo
 
-| Ferramenta | Tipo | Alvo | Resultado (2026-07-11) |
+| Ferramenta | Tipo | Alvo | Resultado (11/07/2026) |
 |---|---|---|---|
 | bandit (`make security`, p3) | SAST | `src/` + `ui/` + `relay/` + `scripts/` | **0 high / 0 medium** — 10 low informativos revisados (o gate reprova em high) |
 | bandit (`make security`, p3-lambda) | SAST | `src/` da function | **0 issues** em qualquer severidade |
 | pip-audit | SCA (deps) | ambiente resolvido do `uv.lock` | **0 vulnerabilidades** conhecidas |
 | OWASP ZAP (baseline) | DAST | API viva (stack compose, `make dast`) | **FAIL 0 · WARN 0 · PASS 65** em 58 URLs — [sumário persistido](../entrega/fase3/evidencias/zap-baseline-2026-07-11.txt) |
 | CodeQL (suíte de qualidade) | SAST semântico | código Python (`make codeql-quality`) | **0 findings ativos** |
-| SonarQube (Community, local) | Análise estática + hotspots | `src/` + coverage importado | **Quality Gate Passed** — 0 bugs, 0 vulnerabilities, 0 hotspots, 0 code smells (143 zerados no PR #6), ratings A/A/A; 94,6% no denominador do Sonar (gate real 96,8%) |
+| SonarQube (Community, local) | Análise estática + hotspots | `src/` + coverage importado | **Quality Gate Passed** — 0 bugs, 0 vulnerabilities, 0 hotspots, 0 code smells (143 zerados no PR #6), ratings A/A/A; 94,6% no denominador do Sonar (gate real 96,4%) |
 | SBOM (CycloneDX, `make sbom`) | Inventário de dependências | deps de runtime do `uv.lock` | **Gerado e validado** — 48 refs |
 | trivy · gitleaks | SCA (imagem) / segredos | imagem Docker, árvore git | **Verdes no CI em 03/09/2026** — trivy 0 HIGH/CRITICAL, gitleaks 0 achados (seção "trivy e gitleaks") |
 
@@ -47,7 +47,7 @@ Suíte de qualidade local (`make codeql-quality`, paridade com o default setup d
 
 ## SonarQube (scan manual de fechamento)
 
-SonarQube Community local + `sonar-scanner` com coverage importado: Quality Gate **Passed**, com 0 bugs, 0 vulnerabilities, 0 security hotspots, 0 code smells e 0% duplicação. Cobertura de 94,6% no denominador do Sonar (o gate real do projeto mede 96,8%; divergência de universo documentada no `sonar-project.properties`). Screenshot do Quality Gate em [entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png](../entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png).
+SonarQube Community local + `sonar-scanner` com coverage importado: Quality Gate **Passed**, com 0 bugs, 0 vulnerabilities, 0 security hotspots, 0 code smells e 0% duplicação. Cobertura de 94,6% no denominador do Sonar (o gate real do projeto mede 96,4%; divergência de universo documentada no `sonar-project.properties`). Screenshot do Quality Gate em [entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png](../entrega/fase3/evidencias/sonarqube-quality-gate-fase3.png).
 
 O primeiro scan apontou 3 security hotspots (os mesmos da fase 2: ReDoS na regex de e-mail e dois avisos de `http://` no exporter OTLP) — todos revisados como SAFE com justificativa inline no código — e **143 code smells** de maintainability (rating A, até então informativos, nunca corrigidos). Os 143 foram zerados no [PR #6](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/pull/6):
 
