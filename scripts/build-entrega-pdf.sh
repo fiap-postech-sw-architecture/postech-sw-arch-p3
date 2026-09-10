@@ -38,7 +38,7 @@ done
 PRELIMINAR=0
 if grep -q "VIDEO-LINK-FASE-3" "$SRC"; then
   PRELIMINAR=1
-  echo "AVISO: VIDEO-LINK-FASE-3 ainda e placeholder -- gerando versao -DRAFT (preencha o link antes de submeter)." >&2
+  echo "AVISO: VIDEO-LINK-FASE-3 ainda presente (video da fase 3 pendente) -- gerando versao -DRAFT." >&2
 fi
 if [ "$PRELIMINAR" = 1 ]; then
   OUT="${OUT:-${OUT_DIR}/documento-entrega-fase-3-DRAFT.pdf}"
@@ -64,7 +64,7 @@ rewrite "$SEGURANCA" "${TMP}/anexoA.md" docs/seguranca
 
 AVISO_PRELIMINAR=""
 if [ "$PRELIMINAR" = 1 ]; then
-  AVISO_PRELIMINAR="_Versão preliminar — link do vídeo pendente (seção 3)_"
+  AVISO_PRELIMINAR="_Versão preliminar — vídeo da fase 3 pendente; a seção 3 traz, provisoriamente, o vídeo da fase 2_"
 fi
 
 # 2) CAPA ABNT (quebra de pagina apos) + CSS de tabela (colunas estreitas de

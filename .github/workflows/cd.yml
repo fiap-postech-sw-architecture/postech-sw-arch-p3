@@ -229,6 +229,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
         run: |
+          command -v aws >/dev/null || { echo "::error::aws cli ausente no runner; gate de credencial impossivel"; exit 1; }
           if [ -z "${AWS_ACCESS_KEY_ID}" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "motivo=secrets AWS ausentes" >> "$GITHUB_OUTPUT"
