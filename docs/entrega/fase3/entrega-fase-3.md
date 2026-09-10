@@ -66,9 +66,7 @@ Vídeo de até 15 minutos demonstrando autenticação com CPF, execução da pip
 
 | Recurso | URL |
 |---|---|
-| Vídeo de demonstração | **Provisório — vídeo da fase 2**, até a publicação do vídeo da fase 3: [https://drive.google.com/file/d/1_HbHWFpPl8dwdIFpbTqX066VjIP-UCod/view](https://drive.google.com/file/d/1_HbHWFpPl8dwdIFpbTqX066VjIP-UCod/view) <!-- VIDEO-LINK-FASE-3 --> |
-
-> Preenchimento: substituir o link provisório acima (e remover o marcador `VIDEO-LINK-FASE-3`) pela URL do vídeo da fase 3 no YouTube/Vimeo (público ou não listado) antes de gerar o PDF final — pendência 1, seção 9.
+| Vídeo de demonstração | [https://drive.google.com/file/d/1_HbHWFpPl8dwdIFpbTqX066VjIP-UCod/view](https://drive.google.com/file/d/1_HbHWFpPl8dwdIFpbTqX066VjIP-UCod/view) |
 
 ## 4. Link da documentação
 
@@ -260,7 +258,7 @@ Ações manuais que permanecem com a equipe (nenhuma bloqueia a navegação dos 
 
 | # | Pendência | Onde |
 |---|---|---|
-| 1 | Gravar o vídeo seguindo o [roteiro](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/entrega/fase3/roteiro-video.md), publicar (YouTube/Vimeo, não listado) e preencher o link na seção 3 (marcador `VIDEO-LINK-FASE-3`) | `docs/entrega/fase3/entrega-fase-3.md` |
+| 1 | Gravar o vídeo da fase 3 seguindo o [roteiro](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/entrega/fase3/roteiro-video.md), publicar (YouTube/Vimeo, não listado) e trocar o link da seção 3 (hoje o vídeo da fase 2, por decisão do grupo em 10/09/2026); regerar o PDF depois | `docs/entrega/fase3/entrega-fase-3.md` |
 | 2 | ~~Adicionar `soat-architecture`~~: convites de colaborador (leitura) enviados nos cinco repositórios em 09/09/2026; repositórios públicos desde 03/09/2026 | GitHub → Settings → Collaborators |
 | 3 | ~~Ativar a proteção técnica da `main`~~: ativa nos cinco repositórios desde 03/09/2026, verificada com conta `admin` em 09/09/2026 (Adendo (h) do ADR-033) | GitHub → Settings → Branches de cada repositório |
 | 4 | ~~Executar o deploy AWS de ponta a ponta~~: concluído em 07/09/2026, com os quatro runs verdes da seção 2 e smoke externo `200/200/401` | Runbook [`aws-academy-setup.md`](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-docs/blob/main/docs/runbooks/aws-academy-setup.md) |
