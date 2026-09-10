@@ -66,9 +66,9 @@ Vídeo de até 15 minutos demonstrando autenticação com CPF, execução da pip
 
 | Recurso | URL |
 |---|---|
-| Vídeo de demonstração | _link será adicionado após a gravação_ <!-- VIDEO-LINK-FASE-3 --> |
+| Vídeo de demonstração | **Provisório — vídeo da fase 2**, até a publicação do vídeo da fase 3: [https://drive.google.com/file/d/1_HbHWFpPl8dwdIFpbTqX066VjIP-UCod/view](https://drive.google.com/file/d/1_HbHWFpPl8dwdIFpbTqX066VjIP-UCod/view) <!-- VIDEO-LINK-FASE-3 --> |
 
-> Preenchimento: substituir a linha acima (e o marcador `VIDEO-LINK-FASE-3`) pela URL do YouTube/Vimeo (público ou não listado) antes de gerar o PDF — pendência 1, seção 9.
+> Preenchimento: substituir o link provisório acima (e remover o marcador `VIDEO-LINK-FASE-3`) pela URL do vídeo da fase 3 no YouTube/Vimeo (público ou não listado) antes de gerar o PDF final — pendência 1, seção 9.
 
 ## 4. Link da documentação
 
