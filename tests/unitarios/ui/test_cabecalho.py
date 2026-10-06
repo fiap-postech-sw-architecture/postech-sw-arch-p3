@@ -28,7 +28,10 @@ if TYPE_CHECKING:
 # {"alg":"HS256","typ":"JWT"} + {"email":"a@b","papel":"admin"} sem padding.
 _HEADER_B64 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
 _PAYLOAD_ADMIN_B64 = "eyJlbWFpbCI6ImFAYiIsInBhcGVsIjoiYWRtaW4ifQ"
-_JWT_ADMIN = f"{_HEADER_B64}.{_PAYLOAD_ADMIN_B64}.assinatura-fake"
+# Assinatura fake, mas base64url valido: o PyJWT 2.15 valida o formato do segmento
+# mesmo com verify_signature=False (uma assinatura malformada vira DecodeError).
+_ASSINATURA_B64 = "c2lnbmF0dXJl"
+_JWT_ADMIN = f"{_HEADER_B64}.{_PAYLOAD_ADMIN_B64}.{_ASSINATURA_B64}"
 
 
 def _instalar_api(
