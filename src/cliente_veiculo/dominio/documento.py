@@ -6,7 +6,10 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-_NAO_DIGITO = re.compile(r"\D")
+# re.ASCII: sem a flag, \D e Unicode e deixa passar digitos de outros alfabetos
+# (ex.: arabe-indicos), que o brutils aceita e que gerariam um documento_hash
+# diferente do mesmo CPF em ASCII -- duplicando o cadastro apesar da UK.
+_NAO_DIGITO = re.compile(r"\D", re.ASCII)
 
 
 def normalizar_e_validar(
@@ -15,7 +18,7 @@ def normalizar_e_validar(
     """Remove mascara e valida com o validador brutils; ValueError se invalido.
 
     Helper unico compartilhado por CPF e CNPJ: a normalizacao (descarte de
-    tudo que nao e digito) e identica, mudando apenas o validador (`is_valid`
+    tudo que nao e digito ASCII) e identica, mudando apenas o validador (`is_valid`
     de `brutils.cpf`/`brutils.cnpj`) e o rotulo da mensagem de erro.
     """
     normalizado = _NAO_DIGITO.sub("", numero)

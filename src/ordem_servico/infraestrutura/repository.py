@@ -59,7 +59,7 @@ _PRIORIDADE_ENCERRADAS: Final[int] = 9
 # `cliente_veiculo/dominio/placa.py:__post_init__`). A consulta por
 # placa+documento precisa aplicar a mesma normalizacao antes do
 # lookup, caso contrario entradas mascaradas/lowercase nao casam.
-_NAO_DIGITO: Final[re.Pattern[str]] = re.compile(r"\D")
+_NAO_DIGITO: Final[re.Pattern[str]] = re.compile(r"\D", re.ASCII)
 
 
 class OrdemDeServicoSQLAlchemyRepository:
