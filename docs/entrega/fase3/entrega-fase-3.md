@@ -2,7 +2,7 @@
 
 > [↑ Raiz do projeto](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3) · [↑ Entrega Fase 3](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/tree/main/docs/entrega/fase3)
 
-> **Versão**: 1.4 — 14/09/2026 (vídeo da fase 3 na seção 3); 1.3 — 10/09/2026 (revisão multi-perspectiva em duas rodadas); 1.2 — 09/09/2026; 1.1 — 03/09/2026; 1.0 — 11/07/2026.
+> **Versão**: 1.5 — 06/10/2026 (feedback do professor: validação do CPF por módulo 11, dashboards em JSON, disciplina de PR e índice da fase 3); 1.4 — 14/09/2026 (vídeo da fase 3 na seção 3); 1.3 — 10/09/2026 (revisão multi-perspectiva em duas rodadas); 1.2 — 09/09/2026; 1.1 — 03/09/2026; 1.0 — 11/07/2026.
 
 Documento de entrega da fase 3 do Tech Challenge da Pós-Graduação em Arquitetura de Software (FIAP). O conteúdo cobre os itens exigidos pelo enunciado da fase: identificação do grupo, links dos quatro repositórios (compartilhados com o avaliador), link do vídeo de demonstração, links das documentações, desenho da arquitetura e a confirmação do usuário `soat-architecture` como colaborador.
 
@@ -82,6 +82,7 @@ Toda a documentação versionada está nos repositórios — a de arquitetura e 
 
 | Recurso | URL |
 |---|---|
+| Índice da fase 3: onde está cada artefato (componentes, sequências, RFC, ADRs, ER, dashboards, governança) | [docs/fase3/README.md](docs/fase3/README.md) |
 | Pasta `docs/` do repositório principal (índice) | [https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/tree/main/docs](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/tree/main/docs) |
 | Requisitos da fase 3 (enunciado transcrito) | [https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/requisitos/fase3/desafio-tech-fase-3.md](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/requisitos/fase3/desafio-tech-fase-3.md) |
 | Gap analysis — enunciado × código da fase 2 (RF-025–027, RNF-025–030, RN-021–022) | [https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/requisitos/fase3/gap-analysis-fase-3.md](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/requisitos/fase3/gap-analysis-fase-3.md) |
@@ -162,7 +163,7 @@ Cada requisito obrigatório da fase 3 ([gap analysis](https://github.com/fiap-po
 
 | ID | Requisito | Implementação / decisão | Evidência de verificação |
 |---|---|---|---|
-| RF-025 | Function serverless: valida CPF, consulta existência e status do cliente, emite JWT | Handler em [`postech-sw-arch-p3-lambda/src`](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-lambda) — validação com brutils, busca por `documento_hash`, emissão HS256 com claims compatíveis com o app ([ADR-028](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/arquitetura/adr/fase3/028-autenticacao-serverless-cpf.md), emulação local [ADR-029](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/arquitetura/adr/fase3/029-emulacao-local-lambda.md)) | Gate local verde: 34 testes unitários no gate (incl. teste de paridade do hash/claims com o app) + 3 testes de integração com PostgreSQL real (testcontainers, alvo `make test-integ` à parte), cobertura 100%; `sam local` valida o runtime real — demonstração integrada executada em 11/07/2026 com códigos HTTP reais (seção 7.5) |
+| RF-025 | Function serverless: valida CPF, consulta existência e status do cliente, emite JWT | Handler em [`postech-sw-arch-p3-lambda/src`](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-lambda) — validação dos dígitos verificadores por módulo 11 (própria, antes do banco), busca por `documento_hash`, emissão HS256 com claims compatíveis com o app ([ADR-028](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/arquitetura/adr/fase3/028-autenticacao-serverless-cpf.md), emulação local [ADR-029](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/arquitetura/adr/fase3/029-emulacao-local-lambda.md)) | Gate local verde: 34 testes unitários no gate (incl. teste de paridade do hash/claims com o app) + 3 testes de integração com PostgreSQL real (testcontainers, alvo `make test-integ` à parte), cobertura 100%; `sam local` valida o runtime real — demonstração integrada executada em 11/07/2026 com códigos HTTP reais (seção 7.5) |
 | RF-026 | API Gateway protegendo rotas sensíveis, com controle e roteamento | HTTP API + rota pública `POST /auth` + Lambda authorizer nas rotas protegidas, Terraform em [`p3-lambda/terraform`](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-lambda) ([ADR-027](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/arquitetura/adr/fase3/027-api-gateway-aws.md)); app revalida JWT + RBAC (defense in depth) | [CD AWS verde](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-lambda/actions/runs/34179043515); smoke do grupo em 07/09/2026: `POST /auth` = 200, `GET /api/v1/minhas-ordens` = 200 com token de cliente e 401 sem token; integração privada Gateway → VPC Link → NLB (Network Load Balancer) interno → EKS validada; testes: `terraform/tests/vpc_link.tftest.hcl` (lambda), `tests/unitarios/ordem_servico/test_router_cliente.py` e `tests/integracao/ordem_servico/test_consulta_ordens_cliente.py` (app) |
 | RF-027 | Dashboards: volume diário de OS, tempo médio por status, erros de integrações | Dashboards **PytStop — Negócio** e **PytStop — Plataforma** provisionados como código em [`k8s/grafana.yaml`](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/k8s/grafana.yaml); métricas de negócio instrumentadas na API (`src/compartilhado/infraestrutura/metrics.py` — OS criadas, duração por status, latência HTTP) ([ADR-032](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/arquitetura/adr/fase3/032-monitoramento-grafana-loki.md)) | Painéis do dashboard de negócio: `OS criadas (últimas 24h)` e `Volume de OS criadas (por hora)` para o volume diário e sua distribuição, `Tempo médio de OS por status` e `Erros de integração (outbox, por hora)`; `make cd-local` sobe a stack completa no kind com os dashboards prontos — mesmos manifests do EKS; capturas dos dois dashboards e das regras de alerta, obtidas no kind em 10/09/2026, no Anexo B; roteiro do vídeo prevê a demonstração ao vivo; testes das métricas dentro do `make check` |
 
@@ -268,14 +269,19 @@ sequenceDiagram
         Note over C,DB: Emissão do token (RF-025)
         C->>GW: POST rota de autenticação (CPF)
         GW->>LA: invoca a function (evento HTTP API)
-        LA->>LA: valida formato do CPF (brutils)
-        LA->>DB: consulta cliente por documento_hash
-        alt CPF inexistente ou cliente inativo
-            LA-->>GW: 401 sem token (RN-022, resposta indistinta)
-            GW-->>C: 401
-        else cliente ativo
-            LA-->>GW: 200 + JWT HS256 (JWT_SECRET compartilhado, papel=cliente)
-            GW-->>C: token (RN-021)
+        LA->>LA: valida dígitos verificadores do CPF (módulo 11)
+        alt CPF inválido
+            LA-->>GW: 400 sem consultar o banco
+            GW-->>C: 400
+        else CPF válido
+            LA->>DB: consulta cliente por documento_hash
+            alt CPF inexistente ou cliente inativo
+                LA-->>GW: 401 sem token (RN-022, resposta indistinta)
+                GW-->>C: 401
+            else cliente ativo
+                LA-->>GW: 200 + JWT HS256 (JWT_SECRET compartilhado, papel=cliente)
+                GW-->>C: token (RN-021)
+            end
         end
     end
 

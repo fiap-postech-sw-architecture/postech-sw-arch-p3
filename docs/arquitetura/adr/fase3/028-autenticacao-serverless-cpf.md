@@ -90,4 +90,14 @@ Criar uma **Lambda em Python, no repo `postech-sw-arch-p3-lambda`**, como a func
 * Evidências do estado atual (emissão/validação JWT, `documento_hash`, invariante de ativo) e requisitos RF-025/RN-021/RN-022: [gap analysis da fase 3](../../../requisitos/fase3/gap-analysis-fase-3.md), tabela de gaps e §2
 * Fichamento do módulo Serverless (repo `postech-sw-arch-p3-docs`, `docs/superpowers/research/serverless.md`): Python entre as linguagens suportadas (aula 06); Cognito user pool como emissor JWT no desenho do material (aula 05); alerta sobre atraso de runtimes gerenciados frente ao release do Python
 
+## Adendo (2026-10-06) — validação própria do CPF (módulo 11)
+
+O feedback do professor da fase 3 apontou que a validação dos dígitos verificadores não aparecia no código da function: o `hashing.py` só normaliza os dígitos. O handler já rejeitava CPF inválido, mas pela biblioteca `brutils`, usada como caixa-preta.
+
+A function passa a ter um validador próprio, `src/autenticacao_cpf/cpf.py`: 11 dígitos ASCII, sem sequência repetida e com os dois dígitos verificadores corretos por módulo 11. Ele roda logo após a normalização e antes de qualquer consulta ao banco; CPF inválido responde `400` sem tocar o RDS. O `brutils` saiu do pacote da function (de 29 MB para 20 MB, e o build perdeu o workaround do `docopt`) e permanece só como dependência de teste.
+
+A paridade de aceitação com o app, que a decisão original buscava usando a mesma biblioteca, passa a ser garantida por um teste que compara o validador próprio com o `brutils` do app em cerca de 100 mil documentos, e pela normalização só com dígitos ASCII nos dois lados: o `\D` do Python é Unicode, deixava passar dígitos arábico-indicos e o `brutils.is_valid` os aceita, o que geraria um `documento_hash` diferente do cadastrado.
+
+O texto original deste ADR fica como registro; onde fala em validar com `brutils` na function, vale este adendo.
+
 > [↑ Raiz do projeto](../../../../README.md) · [↑ Arquitetura](../../README.md)

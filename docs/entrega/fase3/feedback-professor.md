@@ -1,0 +1,17 @@
+# Feedback do professor da fase 3 — tratamento
+
+> [↑ Raiz do projeto](../../../README.md)
+
+> **Versão**: 1.0 — 06/10/2026. Cada ponto do feedback recebido na avaliação da fase 3 e o que foi feito. O feedback está resumido; a nota não é reproduzida.
+
+| # | Tema | O que o professor apontou | O que foi feito | Evidência |
+|---|---|---|---|---|
+| 1 | Serverless | Falta validar os dígitos verificadores do CPF antes da consulta ao banco; o `hashing.py` só normaliza os dígitos | Validador próprio por módulo 11 em `cpf.py`, executado antes de qualquer acesso ao banco: CPF inválido responde `400` sem tocar o RDS. Normalização só com dígitos ASCII nos dois repositórios, que fechou também uma brecha de CPF duplicado por dígitos de outro alfabeto. `brutils` saiu do pacote da function e ficou como dependência de teste, com teste de paridade em cerca de 100 mil documentos | [PR #6 da Lambda](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-lambda/pull/6), [PR #32 do app](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/pull/32), [adendo do ADR-028](../../arquitetura/adr/fase3/028-autenticacao-serverless-cpf.md), diagrama em [RFC-003 §5.1](../../arquitetura/rfc/fase3/rfc-003-gateway-serverless-observabilidade.md#51-autenticação-de-cliente-por-cpf-e-consumo-de-rota-protegida) |
+| 2 | Vídeo | Descreve a autenticação por CPF, a proteção de branch e as métricas do Prometheus e do Grafana | Sem pendência | — |
+| 3 | CI/CD | Quatro repositórios com CD real, mas ainda há muitos commits diretos na `main` (29 no app e 11 na Lambda); aplicar a proteção exigindo PR em todos | A proteção já estava ativa nos cinco repositórios desde 03/09/2026 e é verificável sem permissão de administrador. A auditoria do histórico mostra 0 commits sem PR desde então; os anteriores são de 11 e 12/07/2026. A diferença entre as contagens vem de merges de PR com título sem `(#N)`, corrigido para os próximos merges. Auditoria semanal automatizada, template de PR e documento de governança | [Disciplina de PR](../../governanca/disciplina-de-pr.md), [`audit_pr_discipline.py`](../../../scripts/audit_pr_discipline.py), [workflow `pr-discipline`](../../../.github/workflows/pr-discipline.yml) |
+| 4 | CI/CD (observação) | O `postech-sw-arch-p3-docs` é repositório extra e não conta para o requisito | Sem pendência: o documento de entrega já o declara como repositório de processo, fora dos quatro exigidos | [Documento de entrega, seção 2](entrega-fase-3.md) |
+| 5 | Monitoramento | Versionar os dashboards de negócio (volume diário de OS e tempo médio por status) como JSON separado e documentar cada painel | Os dois dashboards viraram JSON em `k8s/grafana/dashboards/`, com descrição em todos os painéis; o ConfigMap do cluster é gerado deles e um teste trava a divergência. Cada painel está documentado com consulta, métrica de origem e leitura | [PR #33 do app](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/pull/33), [Dashboards do Grafana](../../observabilidade/dashboards-grafana.md) |
+| 6 | Documentação | Material muito extenso; concentrar em um índice os artefatos pedidos (componentes, sequências, RFCs, ADRs e ER) | Índice único da fase 3, ligado do README e da documentação de arquitetura | [Índice da fase 3](../../fase3/README.md) |
+| 7 | Geral | Pequenos ajustes na validação do CPF e na disciplina de PR deixam o projeto impecável | Cobertos pelos itens 1 e 3 | — |
+
+> [↑ Raiz do projeto](../../../README.md)

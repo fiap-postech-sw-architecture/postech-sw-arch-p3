@@ -22,7 +22,7 @@ Duração alvo: ~13min (folga dentro do limite de 15 min — a soma dos blocos a
 
 - abas prontas no browser: README do repo `p3`, aba Actions (ou terminal do gate local), Grafana (`localhost:3000`), Jaeger (`localhost:16686`);
 - ensaio completo pelo menos uma vez (o `make cd-local` leva ~3-5 min em máquina fria);
-- CPFs de demonstração: os clientes semeados usam documentos sintéticos válidos no brutils (ex.: `11144477735` — [`ui/seed.py`](../../../ui/seed.py)); ter um CPF de cliente ativo e um inexistente colados num rascunho.
+- CPFs de demonstração: os clientes semeados usam documentos sintéticos com dígitos verificadores válidos (ex.: `11144477735` — [`ui/seed.py`](../../../ui/seed.py)); ter um CPF de cliente ativo e um inexistente colados num rascunho.
 
 ## Estrutura
 
@@ -69,7 +69,7 @@ curl -s -X POST "$(terraform output -raw auth_url_prod)" \
   -H "Content-Type: application/json" -d '{"cpf": "11144477735"}'
 ```
 
-**Fala**: "A function valida o formato do CPF com brutils, consulta a existência e o status do cliente por hash cego no banco e emite um JWT com o mesmo segredo e claims do app — CPF inexistente ou cliente inativo recebe o mesmo 401, sem vazar qual dos dois."
+**Fala**: "A function valida os dígitos verificadores do CPF por módulo 11, antes de qualquer acesso ao banco, consulta a existência e o status do cliente por hash cego no banco e emite um JWT com o mesmo segredo e claims do app — CPF inexistente ou cliente inativo recebe o mesmo 401, sem vazar qual dos dois."
 
 **Evidência no ar**: 200 com `access_token` para o cliente ativo; 401 para o CPF inexistente; SAM logando a invocação com o runtime `python3.13`.
 

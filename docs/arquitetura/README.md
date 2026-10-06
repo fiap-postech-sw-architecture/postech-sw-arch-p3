@@ -4,7 +4,7 @@
 
 > **Versao**: 1.4 — Fase 1 MVP + fase 2 (ADRs 015-024 aceitas; 024 documenta as métricas com Prometheus + o relay instrumentado com OTel, supersedendo parcialmente a ADR-020 na parte de métricas, TD-022).
 
-Classificação dos documentos de arquitetura do projeto conforme HLD (High-Level Design) e LLD (Low-Level Design).
+Classificação dos documentos de arquitetura do projeto conforme HLD (High-Level Design) e LLD (Low-Level Design). Os artefatos da fase 3 (componentes, sequências, RFC-003, ADRs 026–033 e ER) estão reunidos no [índice da fase 3](../fase3/README.md).
 
 ## 1. Objetivo
 
