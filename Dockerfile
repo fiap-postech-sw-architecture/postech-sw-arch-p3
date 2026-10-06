@@ -49,6 +49,15 @@ LABEL org.opencontainers.image.title="postech-sw-arch-p2 app" \
 # numericos, e o kubelet so consegue verificar runAsNonRoot com um UID numerico
 # (um USER por nome nao e resolvivel no admission). Pinar aqui mantem o dono dos
 # arquivos (/app) igual ao runAsUser, compativel com readOnlyRootFilesystem.
+# Pacotes do SO atualizados a cada build: a tag movel python:3.14-slim fica
+# semanas sem rebuild e o trivy (security.yml, HIGH/CRITICAL com fix) passa a
+# acusar CVEs do Debian ja corrigidos no apt (perl, pcre2, sqlite, gzip em
+# 2026-09) sem nenhuma mudanca no repo. O upgrade puxa as versoes deb13uN.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -r -g 1001 pytstop && useradd -r -u 1001 -g pytstop pytstop
 
 # Sem pip no runtime: o app roda so pelo venv do uv (/app/.venv) e nunca

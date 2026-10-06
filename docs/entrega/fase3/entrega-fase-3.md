@@ -2,7 +2,7 @@
 
 > [↑ Raiz do projeto](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3) · [↑ Entrega Fase 3](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/tree/main/docs/entrega/fase3)
 
-> **Versão**: 1.3 — 10/09/2026 (revisão multi-perspectiva em duas rodadas); 1.2 — 09/09/2026; 1.1 — 03/09/2026; 1.0 — 11/07/2026.
+> **Versão**: 1.4 — 14/09/2026 (vídeo da fase 3 na seção 3); 1.3 — 10/09/2026 (revisão multi-perspectiva em duas rodadas); 1.2 — 09/09/2026; 1.1 — 03/09/2026; 1.0 — 11/07/2026.
 
 Documento de entrega da fase 3 do Tech Challenge da Pós-Graduação em Arquitetura de Software (FIAP). O conteúdo cobre os itens exigidos pelo enunciado da fase: identificação do grupo, links dos quatro repositórios (compartilhados com o avaliador), link do vídeo de demonstração, links das documentações, desenho da arquitetura e a confirmação do usuário `soat-architecture` como colaborador.
 
@@ -72,7 +72,7 @@ Vídeo de até 15 minutos demonstrando autenticação com CPF, execução da pip
 
 | Recurso | URL |
 |---|---|
-| Vídeo de demonstração | [https://drive.google.com/file/d/1_HbHWFpPl8dwdIFpbTqX066VjIP-UCod/view](https://drive.google.com/file/d/1_HbHWFpPl8dwdIFpbTqX066VjIP-UCod/view) |
+| Vídeo de demonstração (YouTube, não listado) | [https://youtu.be/5eRnYug4E3Q](https://youtu.be/5eRnYug4E3Q) |
 
 ## 4. Links da documentação
 
@@ -468,11 +468,11 @@ Ações manuais que permanecem com a equipe (nenhuma bloqueia a navegação dos 
 
 | # | Pendência | Onde |
 |---|---|---|
-| 1 | Gravar o vídeo da fase 3 seguindo o [roteiro](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/entrega/fase3/roteiro-video.md), publicar (YouTube/Vimeo, não listado) e trocar o link da seção 3 (hoje o vídeo da fase 2, por decisão do grupo em 10/09/2026); regerar o PDF depois | `docs/entrega/fase3/entrega-fase-3.md` |
+| 1 | ~~Gravar o vídeo da fase 3~~: gravado pelo [roteiro](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/blob/main/docs/entrega/fase3/roteiro-video.md) e publicado no YouTube (não listado) em 14/09/2026; link na seção 3 | `docs/entrega/fase3/entrega-fase-3.md` |
 | 2 | Aceite do convite de `soat-architecture` (leitura), enviado nos cinco repositórios em 09/09/2026; conferir com `gh api repos/<org>/<repo>/collaborators/soat-architecture` (204 = aceito) | GitHub → Settings → Collaborators |
 | 3 | ~~Ativar a proteção técnica da `main`~~: ativa nos cinco repositórios desde 03/09/2026, verificada com conta `admin` em 09/09/2026 (Adendo (h) do ADR-033) | GitHub → Settings → Branches de cada repositório |
 | 4 | ~~Executar o deploy AWS de ponta a ponta~~: concluído em 07/09/2026, com os quatro runs verdes da seção 2 e smoke externo `200/200/401` | Runbook [`aws-academy-setup.md`](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-docs/blob/main/docs/runbooks/aws-academy-setup.md) |
-| 5 | Mergear `docs/revisao-campeao-fase-3` em `main` e conferir nas páginas publicadas o que o documento cita (Adendo (i) do ADR-033, nós VPC Link/NLB no diagrama do README, `documento_hash`/`consentimentos` no ER da RFC-003); preencher o link do vídeo, regenerar o PDF e submeter no portal do aluno | [Plano de desbloqueio 3](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-docs/blob/main/docs/superpowers/plans/2026-07-11-desbloqueio-3-entrega-final.md) |
+| 5 | ~~Mergear a revisão e preencher o link do vídeo~~ (feito em 10/09 e 14/09/2026); regenerar o PDF (`bash scripts/build-entrega-pdf.sh` na `main`) e submeter no portal do aluno | [Plano de desbloqueio 3](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-docs/blob/main/docs/superpowers/plans/2026-07-11-desbloqueio-3-entrega-final.md) |
 | 6 | Desmontar a infraestrutura AWS ao final da gravação — Lambda/Gateway/VPC Link → app/NLB → EKS → RDS — e encerrar o lab (End Lab): EKS, NLB e VPC Link não têm pausa sem cobrança; prazo interno de sete dias a partir de 07/09/2026 | Runbook [`deploy-manual-aws.md`](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3-docs/blob/main/docs/runbooks/deploy-manual-aws.md) |
 
 ---

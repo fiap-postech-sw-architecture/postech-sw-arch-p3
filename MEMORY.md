@@ -36,6 +36,7 @@ Updated by AI agents at task end per `postech-ai-helper/ai/canonical/task-end-re
 
 ## Gotchas
 
+- 2026-09-14 - Check obrigatorio `trivy (CVE na imagem)` ficou vermelho num PR so de docs: a tag movel `python:3.14-slim` estava sem rebuild e o Debian 13 ja tinha fix (deb13uN) para 12 CVEs HIGH/CRITICAL de perl/pcre2/sqlite/gzip. Fix durável: `apt-get update && apt-get upgrade -y` no estagio runtime do Dockerfile (nao usar .trivyignore quando ha fix). Mesmo padrao do pip removido em 2026-08.
 - 2026-09-10 - newman: a pasta `00 - Smoke fase 3 (newman)` da collection exige `--env-var admin_password=<ADMIN_PASSWORD de k8s/secret.yaml>` alem de `baseUrl`; sem isso o login devolve 401 e os 10 passos falham em cascata. O passo 11 (`/auth` via SAM) so passa com `sam local start-api` no ar — fora dele, gere uma copia da collection sem esse item.
 - 2026-09-10 - weasyprint nao pagina `<img>`: diagrama Mermaid mais alto que a pagina e cortado no rodape em silencio (aconteceu com a sequencia de autenticacao e o ER). `build-entrega-pdf.sh` escolhe paisagem/retrato pela proporcao do PNG e limita com `max-height`; a legenda deriva do comentario `<!-- fonte: RFC-003 §x -->`, obrigatorio antes de cada bloco (o script falha se faltar).
 - 2026-09-09 - `GET`/`PUT /repos/{o}/{r}/branches/main/protection` retornam 404 para usuario sem `admin` MESMO com protecao ativa (falso negativo que virou o Adendo (g)); `gh api repos/{o}/{r}/branches/main --jq .protected` e visivel a qualquer leitor. Antes de afirmar 'sem protecao', confira esse campo ou peça a um admin.
