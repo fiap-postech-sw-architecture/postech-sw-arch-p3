@@ -28,6 +28,11 @@ class TestCNPJ:
         with pytest.raises(ValueError, match="CNPJ invalido"):
             CNPJ(numero="")
 
+    def test_cnpj_com_digitos_de_outro_alfabeto_e_rejeitado(self) -> None:
+        arabe_indico = "".join(chr(0x0660 + int(d)) for d in CNPJ_VALIDO)
+        with pytest.raises(ValueError, match="CNPJ invalido"):
+            CNPJ(numero=arabe_indico)
+
     def test_cnpj_invalido_todos_iguais(self) -> None:
         with pytest.raises(ValueError, match="CNPJ invalido"):
             CNPJ(numero="11111111111111")

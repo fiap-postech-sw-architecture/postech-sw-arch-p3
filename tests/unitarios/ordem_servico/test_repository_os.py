@@ -319,6 +319,38 @@ class TestRepositoryOSIntegracao:
             assert resultado.cliente_id == cliente_id
             assert resultado.veiculo_id == veiculo_id
 
+    def test_obter_mais_recente_por_placa_e_documento_ignora_outro_alfabeto(
+        self, engine_sqlite: Engine
+    ) -> None:
+        """Digitos de outro alfabeto sao descartados na normalizacao (ASCII-only).
+
+        O mesmo CPF em digitos arabe-indicos vira documento vazio e nao casa com
+        o cliente cadastrado em ASCII, em vez de gerar um hash alternativo.
+        """
+        documento_raw = "12345678901"
+        placa_raw = "ABC1D23"
+
+        with Session(engine_sqlite) as sessao_setup:
+            cliente_id, veiculo_id = self._seed_cliente_veiculo(
+                sessao_setup, documento=documento_raw, placa=placa_raw
+            )
+            _inserir_ordem_crua(
+                sessao_setup,
+                status=StatusOrdem.RECEBIDA,
+                criado_em=datetime.now(UTC),
+                cliente_id=cliente_id,
+                veiculo_id=veiculo_id,
+            )
+            sessao_setup.commit()
+
+        arabe_indico = "".join(chr(0x0660 + int(d)) for d in documento_raw)
+        with Session(engine_sqlite) as sessao_query:
+            repo = OrdemDeServicoSQLAlchemyRepository(session=sessao_query)
+            resultado = repo.obter_mais_recente_por_placa_e_documento(
+                placa=placa_raw, documento=arabe_indico
+            )
+            assert resultado is None
+
     def test_obter_mais_recente_por_placa_e_documento_escolhe_a_mais_recente(
         self, engine_sqlite: Engine
     ) -> None:
