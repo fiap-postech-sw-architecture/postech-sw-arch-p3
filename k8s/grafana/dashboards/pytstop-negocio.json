@@ -1,0 +1,233 @@
+{
+  "uid": "pytstop-negocio",
+  "title": "PytStop — Negócio",
+  "description": "Visão de negócio da oficina (RF-027): volume diário de ordens de serviço, tempo médio por status e erros de integração. Fonte: métricas do app e do relay no Prometheus.",
+  "tags": [
+    "pytstop"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "title": "OS criadas (últimas 24h)",
+      "description": "Volume diário de ordens de serviço (RF-027): soma do contador pytstop_os_criadas_total nas últimas 24 horas. Fica em 0 em ambiente recém-criado ou sem tráfego.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(pytstop_os_criadas_total[24h]))",
+          "legendFormat": "OS criadas"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "NOC — status dos serviços",
+      "description": "Visão de NOC: verde (OK) quando o Prometheus consegue coletar o serviço (up = 1) e vermelho (FORA) quando não consegue. Cobre a API, o relay de eventos e o kube-state-metrics.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 18,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "FORA",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "OK",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min by (job) (up{job=~\"pytstop-.*|kube-state-metrics\"})",
+          "legendFormat": "{{job}}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Volume de OS criadas (por hora)",
+      "description": "Distribuição horária do volume de OS (RF-027): incremento de pytstop_os_criadas_total a cada janela de 1 hora. Mostra os picos de entrada de veículos na oficina.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(pytstop_os_criadas_total[1h]))",
+          "legendFormat": "OS criadas/h"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Tempo médio de OS por status",
+      "description": "Tempo médio, em segundos, que as OS permanecem em cada status (RF-027): razão entre a taxa da soma das durações e a taxa de transições, por status. Valores altos em aguardando_aprovacao indicam gargalo na aprovação do orçamento pelo cliente.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(pytstop_os_duracao_status_segundos_sum[1h])) / sum by (status) (rate(pytstop_os_duracao_status_segundos_count[1h]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Erros de integração (outbox, por hora)",
+      "description": "Falhas na entrega de eventos de integração pelo relay (RF-027): tentativas com falha (falhas/h) e eventos que esgotaram as tentativas (dead/h). Qualquer dead dispara o alerta pytstop-outbox-dead.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(outbox_falha_total[1h]))",
+          "legendFormat": "falhas/h"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(increase(outbox_dead_total[1h]))",
+          "legendFormat": "dead/h"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Eventos na fila da outbox (dead = alerta)",
+      "description": "Estado da fila transacional (outbox): eventos aguardando entrega (pendentes) e eventos mortos (dead). Pendentes que só crescem indicam relay parado; dead acima de 0 exige intervenção.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "outbox_pendentes",
+          "legendFormat": "pendentes"
+        },
+        {
+          "refId": "B",
+          "expr": "outbox_dead",
+          "legendFormat": "dead"
+        }
+      ]
+    }
+  ]
+}

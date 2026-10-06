@@ -1,0 +1,233 @@
+{
+  "uid": "pytstop-plataforma",
+  "title": "PytStop — Plataforma",
+  "description": "Visão de plataforma (RNF-028): disponibilidade, taxa de erro 5xx, latência por rota e consumo de CPU e memória por pod.",
+  "tags": [
+    "pytstop"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Health da API (up)",
+      "description": "Health da API (RNF-028): OK quando o Prometheus coleta o /metrics da API (up = 1). Base do alerta pytstop-api-fora.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "FORA",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "OK",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min(up{job=\"pytstop-api\"})",
+          "legendFormat": "pytstop-api",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Uptime da API (24h)",
+      "description": "Disponibilidade da API nas últimas 24 horas (RNF-028): média da série up do job pytstop-api, em percentual.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg(avg_over_time(up{job=\"pytstop-api\"}[24h]))",
+          "legendFormat": "uptime 24h"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Taxa de erro (5xx)",
+      "description": "Proporção de requisições HTTP respondidas com 5xx sobre o total, em janela de 5 minutos (RNF-028). Acima de 1% por 5 minutos dispara o alerta pytstop-taxa-5xx.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_request_duration_seconds_count{status=~\"5..\"}[5m])) / sum(rate(http_request_duration_seconds_count[5m]))",
+          "legendFormat": "5xx / total"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Latência por rota — p50 / p90 / p99",
+      "description": "Latência da API por rota (RNF-028), calculada a partir do histograma http_request_duration_seconds em janela de 5 minutos. O p95 acima de 300 ms por 5 minutos dispara o alerta pytstop-latencia-p95.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le, rota) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{rota}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.90, sum by (le, rota) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p90 {{rota}}"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le, rota) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{rota}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "CPU por pod (cores)",
+      "description": "Consumo de CPU por pod do namespace pytstop, em cores, via cAdvisor (RNF-028). Referência para o alerta de CPU acima de 80% do limite.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"pytstop\", container!=\"\"}[5m]))",
+          "legendFormat": "{{pod}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Memória por pod (working set)",
+      "description": "Memória em uso (working set) por pod do namespace pytstop, em bytes, via cAdvisor (RNF-028). Crescimento contínuo sugere vazamento; compare com o limite do deployment.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"pytstop\", container!=\"\"})",
+          "legendFormat": "{{pod}}"
+        }
+      ]
+    }
+  ]
+}

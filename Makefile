@@ -78,6 +78,15 @@ lint:
 	$(PY_UI_TEST)ruff check $(PY_PATHS_COM_TESTS)
 	$(PY_UI_TEST)ruff format --check $(PY_PATHS_COM_TESTS)
 
+# Dashboards do Grafana: os JSON em k8s/grafana/dashboards/ sao a fonte; o ConfigMap de
+# k8s/grafana.yaml e gerado deles (o teste test_grafana_dashboards.py trava a divergencia).
+.PHONY: grafana-sync grafana-check
+grafana-sync:
+	$(PY_UI_TEST)python scripts/grafana_dashboards.py
+
+grafana-check:
+	$(PY_UI_TEST)python scripts/grafana_dashboards.py --check
+
 # Contratos de arquitetura (ADR-015 / RNF-017): camadas Clean por contexto +
 # proibicao dominio -> infraestrutura. Config em [tool.importlinter] no
 # pyproject.toml.
