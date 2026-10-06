@@ -1,0 +1,28 @@
+name: PR discipline
+
+# Prova pelo historico que nenhum commit entra na main sem PR nos cinco
+# repositorios da fase 3 (docs/governanca/disciplina-de-pr.md). So le commits e
+# PRs associados via GraphQL; os repositorios sao publicos, o GITHUB_TOKEN basta.
+# Nao e check obrigatorio de PR: roda por cron e sob demanda.
+
+on:
+  schedule:
+    # Segunda 12:00 UTC.
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  auditar:
+    name: Auditoria de commits sem PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # A data de corte e o dia em que a protecao da main foi ativada (03/09/2026).
+      - name: Auditar os cinco repositorios
+        run: python3 scripts/audit_pr_discipline.py --since 2026-09-03
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -16,6 +16,8 @@
 
 Sistema de gestão de ordens de serviço de uma oficina mecânica de médio porte (clientes, veículos, OS, estoque, orçamentos), construído com Domain-Driven Design na fase 1, evoluído na fase 2 para Clean Architecture com Kubernetes e CI/CD, e levado à nuvem AWS na fase 3: API Gateway + autenticação serverless na borda, cluster EKS, banco gerenciado RDS e observabilidade completa.
 
+> **Navegação da fase 3**: [índice dos artefatos](docs/fase3/README.md) (componentes, sequências, RFC, ADRs, ER, dashboards) · [disciplina de PR e proteção da `main`](docs/governanca/disciplina-de-pr.md) · [feedback do professor e como foi tratado](docs/entrega/fase3/feedback-professor.md)
+
 ## Este repositório entre os quatro
 
 A fase 3 exige o projeto em repositórios separados, cada um com CI/CD próprio ([ADR-033](docs/arquitetura/adr/fase3/033-cicd-multi-repo.md)). **Este repo (`postech-sw-arch-p3`) é a aplicação**: o monolito FastAPI (Clean Architecture), os manifests Kubernetes de [`k8s/`](k8s/README.md) — incluindo o overlay EKS — e o pipeline que builda a imagem e faz o deploy no cluster.
@@ -250,9 +252,9 @@ Artefatos versionados da fase 3: [OpenAPI (`openapi-fase3.json`)](docs/entrega/f
 | Overlay EKS + pipeline homolog/produção | ✅ commitados ([`k8s/overlays/eks/`](k8s/overlays/eks/kustomization.yaml), [`cd.yml`](.github/workflows/cd.yml)) |
 | Execução dos pipelines no GitHub Actions | ✅ CI completo e [CD de produção](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/actions/runs/34178566291) verdes; `main` protegida (PR + checks) desde 03/09/2026, verificada em 09/09/2026 |
 | Provisionamento EKS/RDS/gateway na AWS | ✅ RDS, EKS, NLB interno, Lambda, API Gateway e VPC Link validados em `us-east-1` |
-| Vídeo de demonstração e PDF da entrega | ⏳ pendentes — passo a passo na issue de fechamento da fase 3 ([#16](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/issues/16)) |
+| Vídeo de demonstração e PDF da entrega | ✅ entregues em 14/09/2026: [vídeo](https://youtu.be/5eRnYug4E3Q) e [PDF](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/releases/tag/entrega-fase-3); fechamento na issue [#16](https://github.com/fiap-postech-sw-architecture/postech-sw-arch-p3/issues/16) e feedback da avaliação em [`feedback-professor.md`](docs/entrega/fase3/feedback-professor.md) |
 
-- Endpoint público atual: `https://rs6lbkn7p4.execute-api.us-east-1.amazonaws.com/prod`. O ambiente AWS Academy é temporário; após a desmontagem, o run do CD permanece como evidência reproduzível.
+- Endpoint público usado na avaliação: `https://rs6lbkn7p4.execute-api.us-east-1.amazonaws.com/prod`. O ambiente AWS Academy era temporário e foi desmontado (o DNS do endpoint deixou de resolver; verificado em 06/10/2026); o run do CD permanece como evidência reproduzível.
 
 ## Desenvolvimento
 
@@ -360,9 +362,12 @@ O repositório tem um workflow que roda o [Claude Code Action](https://github.co
 
 | Artefato | Descrição |
 |---|---|
+| [Índice da fase 3](docs/fase3/README.md) | Onde está cada artefato pedido: componentes, sequências, RFC, ADRs, ER, dashboards, repositórios e governança |
 | [Tech Challenge Fase 3](docs/requisitos/fase3/desafio-tech-fase-3.md) | Especificação original da fase |
 | [Gap Analysis Fase 3](docs/requisitos/fase3/gap-analysis-fase-3.md) | Challenge × código herdado → RF-025–027, RNF-025–030, RN-021/022 e riscos |
 | [RFC-003](docs/arquitetura/rfc/fase3/rfc-003-gateway-serverless-observabilidade.md) | Desenho integrado da fase 3 (topologias, diagramas, deploy multi-repo, correlação) |
+| [Dashboards do Grafana](docs/observabilidade/dashboards-grafana.md) | Cada painel dos dois dashboards (JSON versionado), consulta, métrica de origem e regras de alerta |
+| [Disciplina de PR](docs/governanca/disciplina-de-pr.md) | Proteção da `main`, auditoria de commits sem PR e como conferir sem ser administrador |
 | [Glossário](docs/requisitos/glossario.md) | Linguagem Ubíqua -- termos de domínio |
 | [Mapa de Contextos](docs/arquitetura/mapa-contextos.md) | 5 contextos delimitados com padrões de integração |
 | [Modelo de Domínio](docs/arquitetura/modelo-dominio.md) | Diagramas de classes por agregado |

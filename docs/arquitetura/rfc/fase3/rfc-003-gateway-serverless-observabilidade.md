@@ -58,7 +58,7 @@ A nuvem da fase 3 é a **AWS via conta AWS Academy Learner Lab**, região fixa `
 ### Borda serverless: gateway + duas Lambdas
 
 - **Amazon API Gateway, modo HTTP API** ([ADR-027](../../adr/fase3/027-api-gateway-aws.md)): porta de entrada única do sistema na nuvem. A rota de autenticação de cliente vai à Lambda de autenticação; as rotas protegidas do app passam pelo Lambda authorizer e seguem por VPC Link até o listener do NLB interno. O parameter mapping remove o prefixo do stage e preserva o caminho esperado pelo FastAPI. O Service da aplicação não publica endpoint acessível pela internet.
-- **Lambda de autenticação** ([ADR-028](../../adr/fase3/028-autenticacao-serverless-cpf.md)): runtime `python3.13`, valida formato do CPF com brutils, consulta o cliente no RDS pela mesma estratégia `documento_hash` do app, nega token a CPF inexistente ou cliente inativo (RN-022, resposta 401 indistinta para não vazar existência de CPF) e emite JWT HS256 com o `JWT_SECRET` compartilhado e a claim `papel="cliente"` (RN-021). Acesso ao banco somente leitura, restrito à consulta de cliente.
+- **Lambda de autenticação** ([ADR-028](../../adr/fase3/028-autenticacao-serverless-cpf.md)): runtime `python3.13`, valida os dígitos verificadores do CPF por módulo 11 (validador próprio, antes de qualquer acesso ao banco), consulta o cliente no RDS pela mesma estratégia `documento_hash` do app, nega token a CPF inexistente ou cliente inativo (RN-022, resposta 401 indistinta para não vazar existência de CPF) e emite JWT HS256 com o `JWT_SECRET` compartilhado e a claim `papel="cliente"` (RN-021). Acesso ao banco somente leitura, restrito à consulta de cliente.
 - **Lambda authorizer** ([ADR-027](../../adr/fase3/027-api-gateway-aws.md)): valida a assinatura HS256 do token (emitido pela Lambda de autenticação ou pelo login interno do app — mesmo segredo, mesmo validador) antes de o gateway rotear às rotas sensíveis. O app **mantém a validação redundante** em `obter_usuario_atual` (defense in depth + paridade local).
 
 ### Cluster e workloads (EKS)
@@ -281,7 +281,7 @@ Notas de leitura:
 
 ### 5.1 Autenticação de cliente por CPF e consumo de rota protegida
 
-Cobre RF-025, RF-026, RN-021 e RN-022. O caminho do CPF na Lambda é o mesmo do app: validação de formato com brutils e consulta por `documento_hash` ([ADR-028](../../adr/fase3/028-autenticacao-serverless-cpf.md)). O nome exato da rota de autenticação no gateway é *detalhamento, decisão na implementação*.
+Cobre RF-025, RF-026, RN-021 e RN-022. O caminho do CPF na Lambda é o mesmo do app: validação dos dígitos verificadores (módulo 11, validador próprio da function com paridade testada contra o `brutils` do app) e consulta por `documento_hash` ([ADR-028](../../adr/fase3/028-autenticacao-serverless-cpf.md)). O nome exato da rota de autenticação no gateway é *detalhamento, decisão na implementação*.
 
 ```mermaid
 sequenceDiagram
@@ -297,14 +297,19 @@ sequenceDiagram
         Note over C,DB: Emissão do token (RF-025)
         C->>GW: POST rota de autenticação (CPF)
         GW->>LA: invoca a function (evento HTTP API)
-        LA->>LA: valida formato do CPF (brutils)
-        LA->>DB: consulta cliente por documento_hash
-        alt CPF inexistente ou cliente inativo
-            LA-->>GW: 401 sem token (RN-022, resposta indistinta)
-            GW-->>C: 401
-        else cliente ativo
-            LA-->>GW: 200 + JWT HS256 (JWT_SECRET compartilhado, papel=cliente)
-            GW-->>C: token (RN-021)
+        LA->>LA: valida dígitos verificadores do CPF (módulo 11)
+        alt CPF inválido
+            LA-->>GW: 400 sem consultar o banco
+            GW-->>C: 400
+        else CPF válido
+            LA->>DB: consulta cliente por documento_hash
+            alt CPF inexistente ou cliente inativo
+                LA-->>GW: 401 sem token (RN-022, resposta indistinta)
+                GW-->>C: 401
+            else cliente ativo
+                LA-->>GW: 200 + JWT HS256 (JWT_SECRET compartilhado, papel=cliente)
+                GW-->>C: token (RN-021)
+            end
         end
     end
 

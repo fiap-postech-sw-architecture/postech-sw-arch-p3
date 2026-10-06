@@ -25,6 +25,17 @@ make grafana-check   # exit 1 se estiver fora de sincronia (o teste unitário fa
 
 Documentação de cada painel: [`docs/observabilidade/dashboards-grafana.md`](../docs/observabilidade/dashboards-grafana.md).
 
+## audit_pr_discipline.py
+
+Audita a disciplina de PR: conta, por repositório, os commits da `main` sem pull request associado (GraphQL do GitHub via `gh`, sem permissão de administrador) e sai com 1 se houver algum a partir da data de corte. Stdlib-only. O workflow semanal `pr-discipline.yml` roda o mesmo comando.
+
+```bash
+python scripts/audit_pr_discipline.py                     # os cinco repositórios da fase 3
+python scripts/audit_pr_discipline.py --since 2026-09-03  # data da proteção da main
+```
+
+Contexto e resultado: [`docs/governanca/disciplina-de-pr.md`](../docs/governanca/disciplina-de-pr.md).
+
 ## rewrite-md-links.py
 
 Reescreve links relativos em markdown para URLs absolutas no GitHub (branch alvo). Usado para gerar o PDF da entrega autocontido (links resolvem mesmo fora do repo). Externos (`https://`, `mailto:`, anchors) passam direto.

@@ -4,7 +4,7 @@
 
 > **Versão**: 1.1 — Fase 1 MVP + índice da Fase 2.
 
-Artefatos relacionados à entrega da Fase 1 do Tech Challenge FIAP. Os artefatos da **Fase 2** estão em [fase2/](fase2/README.md).
+Artefatos relacionados à entrega da Fase 1 do Tech Challenge FIAP. Os artefatos da **Fase 2** estão em [fase2/](fase2/README.md) e os da **Fase 3** em [fase3/](fase3/entrega-fase-3.md); o índice completo da fase 3 está em [`docs/fase3/README.md`](../fase3/README.md).
 
 ## Documentos
 
