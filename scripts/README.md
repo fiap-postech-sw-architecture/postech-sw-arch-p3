@@ -14,6 +14,17 @@ bash scripts/lint-doc-anchors.sh README.md docs/entrega/*.md
 
 Exit 0 se todos passarem; exit 1 e lista de violações em stderr caso contrário. Sem args, imprime uso e sai 1.
 
+## grafana_dashboards.py
+
+Mantém o ConfigMap `grafana-dashboards` de `k8s/grafana.yaml` em sincronia com os JSON de `k8s/grafana/dashboards/` (fonte única, importáveis no Grafana). Stdlib-only.
+
+```bash
+make grafana-sync    # regrava o ConfigMap a partir dos JSON
+make grafana-check   # exit 1 se estiver fora de sincronia (o teste unitário faz o mesmo no CI)
+```
+
+Documentação de cada painel: [`docs/observabilidade/dashboards-grafana.md`](../docs/observabilidade/dashboards-grafana.md).
+
 ## rewrite-md-links.py
 
 Reescreve links relativos em markdown para URLs absolutas no GitHub (branch alvo). Usado para gerar o PDF da entrega autocontido (links resolvem mesmo fora do repo). Externos (`https://`, `mailto:`, anchors) passam direto.
